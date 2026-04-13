@@ -87,7 +87,7 @@ jobs:
           path: artifacts
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: ncipollo/release-action@v1
         with:
           body: |
             ## Bambu Lab Monitor v$GITHUB_REF_NAME
@@ -107,7 +107,8 @@ jobs:
             BAMBU_SN   = 序列号
             BAMBU_CODE = 接入码
             ```
-          files: artifacts/**
+          artifacts: artifacts/**
+          artifactErrorsFailBuild: false
           draft: false
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
         env:
