@@ -601,6 +601,20 @@
   }
 
   // ── Backend port resolution + SSE connection ──────────────────────────────
+  // Step 0: Wait for backend to be ready (up to 12s)
+  async function waitForBackend(port) {
+    const deadline = Date.now() + 12000;
+    showScreen('正在启动后端服务…', '', '请稍候几秒钟…');
+    while (Date.now() < deadline) {
+      try {
+        const r = await fetch(`http://localhost:${port}/api/health`, {signal: AbortSignal.timeout(1500)});
+        if (r.ok) return true;
+      } catch {}
+      await new Promise(r => setTimeout(r, 1500));
+    }
+    return false;
+  }
+
   async function connect() {
     // Step 1: resolve port
     let port = 0;
@@ -613,7 +627,7 @@
       // Not in Tauri, try polling a known range
       for (let p = 5001; p <= 5010; p++) {
         try {
-          const r = await fetch(`http://localhost:${p}/api/status`, {signal: AbortSignal.timeout(800)});
+          const r = await fetch(`http://localhost:${p}/api/health`, {signal: AbortSignal.timeout(800)});
           if (r.ok) { port = p; break; }
         } catch {}
       }
@@ -624,6 +638,17 @@
         '后端服务未启动',
         '',
         '无法连接到后端服务。\n请确保 Bambu Monitor 已启动，或尝试重新安装。'
+      );
+      return;
+    }
+
+    // Step 1b: wait for backend to be fully ready
+    const ready = await waitForBackend(port);
+    if (!ready) {
+      showScreen(
+        '后端服务启动失败',
+        '',
+        '后端服务无法正常响应。\n请查看控制台日志，或尝试重启应用。'
       );
       return;
     }
