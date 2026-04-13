@@ -616,23 +616,19 @@
   }
 
   async function connect() {
-    // Step 1: resolve port
+    // Step 1: resolve port (with retry — HTTP server may still be binding)
     let port = 0;
+    showScreen('正在启动后端服务…', '', '请稍候…');
     try {
       const { invoke } = window.__TAURI__ || {};
       if (invoke) {
-        port = await invoke('get_http_port');
+        for (let retry = 0; retry < 20; retry++) {
+          port = await invoke('get_http_port');
+          if (port !== 0) break;
+          await new Promise(r => setTimeout(r, 500));
+        }
       }
-    } catch (e) {
-      // Not in Tauri, try polling a known range
-      for (let p = 5001; p <= 5010; p++) {
-        try {
-          const r = await fetch(`http://localhost:${p}/api/health`, {signal: AbortSignal.timeout(800)});
-          if (r.ok) { port = p; break; }
-        } catch {}
-      }
-    }
-
+    } catch (e) {}
     if (!port) {
       showScreen(
         '后端服务未启动',
