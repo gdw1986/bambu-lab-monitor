@@ -18,6 +18,8 @@ use std::time::Duration;
 
 /// Module-level HTTP server port, written once at bind time, read by Tauri commands.
 static HTTP_PORT: AtomicU16 = AtomicU16::new(0);
+/// Module-level MQTT connected flag, written by mqtt_loop, read by get_debug_info.
+static MQTT_CONNECTED: AtomicBool = AtomicBool::new(false);
 
 use chrono::Local;
 use rumqttc::{AsyncClient, Event as MqttEvent, MqttOptions, Packet, QoS};
@@ -392,6 +394,7 @@ pub async fn mqtt_loop(app_state: Arc<SharedState>) {
                 }
                 Ok(MqttEvent::Incoming(Packet::ConnAck(_))) => {
                     log::info!("MQTT connected ✓");
+                    MQTT_CONNECTED.store(true, Ordering::SeqCst);
                     let state = (*app_state.state.read().unwrap()).clone();
                     let _ = app_state.tx.send(state);
                 }
@@ -479,7 +482,6 @@ fn handle_connection(
 
 fn serve_http(listener: std::net::TcpListener, shared: Arc<SharedState>) {
     let bound_port = listener.local_addr().map(|a| a.port()).unwrap_or(5001);
-    HTTP_PORT.store(bound_port, Ordering::SeqCst);
     log::info!("HTTP listening on http://0.0.0.0:{}", bound_port);
     listener.set_nonblocking(true).ok();
 
@@ -703,6 +705,8 @@ pub fn start_http_server(shared: Arc<SharedState>) -> JoinHandle<()> {
     };
 
     let bound_port = listener.local_addr().map(|a| a.port()).unwrap_or(5001);
+    // Set HTTP_PORT HERE so frontend sees it immediately, before thread even starts
+    HTTP_PORT.store(bound_port, Ordering::SeqCst);
     log::info!("HTTP server starting on port {}", bound_port);
 
     thread::spawn(move || {
@@ -713,4 +717,9 @@ pub fn start_http_server(shared: Arc<SharedState>) -> JoinHandle<()> {
 /// Read the current HTTP server port (0 if not started yet).
 pub fn http_port() -> u16 {
     HTTP_PORT.load(Ordering::SeqCst)
+}
+
+/// Read whether MQTT has successfully connected at least once.
+pub fn mqtt_connected() -> bool {
+    MQTT_CONNECTED.load(Ordering::SeqCst)
 }

@@ -618,22 +618,34 @@
   async function connect() {
     // Step 1: resolve port (with retry — HTTP server may still be binding)
     let port = 0;
-    showScreen('正在启动后端服务…', '', '请稍候…');
+    let debugInfo = '';
+    const diag = async () => {
+      try {
+        const { invoke } = window.__TAURI__ || {};
+        if (invoke) {
+          debugInfo = await invoke('get_debug_info').catch(() => 'invoke_failed');
+        }
+      } catch {}
+    };
+    showScreen('正在启动后端服务…', '', '请稍候…\n' + debugInfo);
     try {
       const { invoke } = window.__TAURI__ || {};
       if (invoke) {
         for (let retry = 0; retry < 20; retry++) {
-          port = await invoke('get_http_port');
+          await diag();
+          port = await invoke('get_http_port').catch(() => 0);
           if (port !== 0) break;
           await new Promise(r => setTimeout(r, 500));
+          showScreen('正在启动后端服务…', `重试 ${retry + 1}/20`, debugInfo);
         }
       }
     } catch (e) {}
     if (!port) {
+      await diag();
       showScreen(
         '后端服务未启动',
         '',
-        '无法连接到后端服务。\n请确保 Bambu Monitor 已启动，或尝试重新安装。'
+        '诊断信息：\n' + (debugInfo || '(无法获取)') + '\n\n无法连接到后端服务。请查看上方诊断信息并汇报。'
       );
       return;
     }
@@ -641,10 +653,11 @@
     // Step 1b: wait for backend to be fully ready
     const ready = await waitForBackend(port);
     if (!ready) {
+      await diag();
       showScreen(
         '后端服务启动失败',
         '',
-        '后端服务无法正常响应。\n请查看控制台日志，或尝试重启应用。'
+        '诊断信息：\n' + (debugInfo || '(无法获取)') + '\n\n后端服务无法正常响应。请查看控制台日志。'
       );
       return;
     }

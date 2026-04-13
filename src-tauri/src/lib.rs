@@ -5,6 +5,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use log::{error, info, warn};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -171,6 +172,17 @@ fn get_http_port() -> u16 {
     server::http_port()
 }
 
+#[tauri::command]
+fn get_debug_info() -> String {
+    format!(
+        "http_port={} mqtt_connected={} app_version={} tauri_version={}",
+        server::http_port(),
+        server::mqtt_connected(),
+        env!("CARGO_PKG_VERSION"),
+        tauri::VERSION,
+    )
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 static PRINT_WAS_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -183,9 +195,15 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![send_notification, get_http_port])
+        .invoke_handler(tauri::generate_handler![send_notification, get_http_port, get_debug_info])
         .setup(|app| {
-            setup_tray(app.handle())?;
+            info!("=== Bambu Monitor setup starting ===");
+
+            setup_tray(app.handle()).map_err(|e| {
+                error!("setup_tray FAILED: {}", e);
+                e
+            })?;
+            info!("Tray icon OK");
 
             // Shared state for HTTP + MQTT
             let (tx, _rx) = broadcast::channel::<server::PrinterState>(64);
@@ -195,25 +213,25 @@ pub fn run() {
 
             // HTTP server (tiny_http, runs in dedicated thread)
             let http_shared = shared.clone();
-            start_http_server(http_shared);
+            info!("Calling start_http_server()...");
+            let _jh = start_http_server(http_shared);
+            let port = server::http_port();
+            info!("start_http_server() returned, http_port() = {}", port);
 
-            // Wait for HTTP server to actually start before signaling frontend ready
-            let ready_app = app_handle.clone();
-            tauri::async_runtime::spawn(async move {
-                for _ in 0..20 {
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    if server::http_port() != 0 {
-                        let _ = ready_app.emit("backend-ready", ());
-                        break;
-                    }
-                }
-            });
+            if port == 0 {
+                warn!("HTTP server returned port 0 — possible binding failure");
+            } else {
+                info!("HTTP server ready on port {}", port);
+            }
 
             // MQTT client (rumqttc, async task)
             let mqtt_shared = shared.clone();
             tauri::async_runtime::spawn(async move {
                 mqtt_loop(mqtt_shared).await;
             });
+
+            info!("=== Bambu Monitor setup complete ===");
+            Ok(())
 
             // Tray icon updater — polls /api/status every 6s
             let client = reqwest::Client::builder()
