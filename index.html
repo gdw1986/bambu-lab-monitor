@@ -29,7 +29,6 @@
     overflow-x: hidden;
   }
 
-  /* subtle grid bg */
   body::before {
     content: '';
     position: fixed; inset: 0;
@@ -78,7 +77,6 @@
   .dot.online { background: var(--accent); box-shadow: 0 0 10px var(--accent); animation: pulse 2.4s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
 
-
   /* ── Hero Progress ── */
   .hero-progress {
     background: linear-gradient(135deg, #1a1a1a 0%, #222 100%);
@@ -99,7 +97,6 @@
     display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
     margin-bottom: 16px;
   }
-  .hero-left {}
   .hero-state-badge {
     display: inline-flex; align-items: center; gap: 6px;
     background: rgba(0,255,136,.1); border: 1px solid rgba(0,255,136,.3);
@@ -157,8 +154,6 @@
   .hero-meta-val { font-size: 15px; font-family: var(--mono); font-weight: 600; color: var(--text); }
   .hero-eta-val { color: #00d4aa; }
   .hero-layer-val { color: #fff; }
-  .hero-temp-val { color: #ffb000; }
-
 
   /* ── Job card ── */
   .job-card {
@@ -328,7 +323,7 @@
 
   <header>
     <div class="logo">Bambu <span>//</span> Monitor</div>
-    <button onclick="openCfg()" style="background:transparent; border:1px solid var(--border); border-radius:7px; padding:6px 14px; color:var(--muted); font-family:var(--mono); font-size:11px; cursor:pointer; letter-spacing:.06em; transition:border-color .2s,color .2s" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">⚙ Settings</button>
+    <button onclick="openCfg()" style="background:transparent; border:1px solid var(--border); border-radius:7px; padding:6px 14px; color:var(--muted); font-family:var(--mono); font-size:11px; cursor:pointer; letter-spacing:.06em; transition:border-color .2s,color .2s" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">⚙ 设置</button>
     <div class="status-dot">
       <span class="dot" id="dot"></span>
       <span id="conn-status">连接中…</span>
@@ -429,7 +424,7 @@
   <!-- Stats -->
   <div class="stats-row">
     <div class="stat-card slide-up" style="animation-delay:.16s">
-      <div class="stat-label">Status</div>
+      <div class="stat-label">状态</div>
       <div class="state-row" id="state-badges">
         <span class="badge badge-idle">—</span>
       </div>
@@ -437,17 +432,17 @@
     <div class="stat-card slide-up" style="animation-delay:.2s">
       <div class="stat-label">剩余时间</div>
       <div class="stat-val m" id="stat-remaining">—</div>
-      <div class="stat-sub">hh:mm:ss</div>
+      <div class="stat-sub">时:分:秒</div>
     </div>
     <div class="stat-card slide-up" style="animation-delay:.24s">
       <div class="stat-label">层</div>
       <div class="stat-val m" id="stat-layer">— / —</div>
-      <div class="stat-sub">current / total</div>
+      <div class="stat-sub">当前 / 总计</div>
     </div>
     <div class="stat-card slide-up" style="animation-delay:.28s">
       <div class="stat-label">当前耗材</div>
       <div class="stat-val m" id="stat-filament">—</div>
-      <div class="stat-sub">type</div>
+      <div class="stat-sub">类型</div>
     </div>
   </div>
 
@@ -455,10 +450,10 @@
   <div class="ams-section">
     <div class="ams-title">AMS 料槽</div>
     <div class="ams-grid" id="ams-grid">
-      <div class="ams-slot"><div class="ams-slot-header">Slot 1</div><div class="ams-mat">—</div></div>
-      <div class="ams-slot"><div class="ams-slot-header">Slot 2</div><div class="ams-mat">—</div></div>
-      <div class="ams-slot"><div class="ams-slot-header">Slot 3</div><div class="ams-mat">—</div></div>
-      <div class="ams-slot"><div class="ams-slot-header">Slot 4</div><div class="ams-mat">—</div></div>
+      <div class="ams-slot"><div class="ams-slot-header">槽位 1</div><div class="ams-mat">—</div></div>
+      <div class="ams-slot"><div class="ams-slot-header">槽位 2</div><div class="ams-mat">—</div></div>
+      <div class="ams-slot"><div class="ams-slot-header">槽位 3</div><div class="ams-mat">—</div></div>
+      <div class="ams-slot"><div class="ams-slot-header">槽位 4</div><div class="ams-mat">—</div></div>
     </div>
   </div>
 
@@ -469,12 +464,12 @@
     <div style="background:var(--surface); border:1px solid var(--border); border-radius:16px;
       padding:36px; width:min(480px,92vw); box-shadow:0 24px 64px rgba(0,0,0,.5)">
       <h2 style="font-family:var(--mono); font-size:15px; color:var(--accent); margin-bottom:24px;
-        letter-spacing:.08em; text-transform:uppercase;">⚙ Printer Config</h2>
+        letter-spacing:.08em; text-transform:uppercase;">⚙ 打印机配置</h2>
       <div style="display:flex; flex-direction:column; gap:16px">
         <div>
           <label style="font-family:var(--mono); font-size:11px; color:var(--muted);
             text-transform:uppercase; letter-spacing:.1em; display:block; margin-bottom:6px">
-            Printer IP / Hostname
+            打印机 IP / 主机名
           </label>
           <input id="cfg-host" type="text" placeholder="192.168.1.100" value=""
             style="width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px;
@@ -484,7 +479,7 @@
         <div>
           <label style="font-family:var(--mono); font-size:11px; color:var(--muted);
             text-transform:uppercase; letter-spacing:.1em; display:block; margin-bottom:6px">
-            Device Serial Number
+            设备序列号
           </label>
           <input id="cfg-serial" type="text" placeholder="CMA7GX123456"
             style="width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px;
@@ -494,7 +489,7 @@
         <div>
           <label style="font-family:var(--mono); font-size:11px; color:var(--muted);
             text-transform:uppercase; letter-spacing:.1em; display:block; margin-bottom:6px">
-            Access Code (LAN Mode Pin)
+            访问码（局域网模式 PIN）
           </label>
           <input id="cfg-code" type="password" placeholder="12345678"
             style="width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px;
@@ -507,10 +502,10 @@
       <div style="display:flex; gap:10px; margin-top:20px; justify-content:flex-end">
         <button onclick="closeCfg()" style="background:transparent; border:1px solid var(--border);
           border-radius:8px; padding:9px 20px; color:var(--muted); font-family:var(--mono);
-          font-size:12px; cursor:pointer; letter-spacing:.06em">Cancel</button>
+          font-size:12px; cursor:pointer; letter-spacing:.06em">取消</button>
         <button onclick="saveCfg()" style="background:var(--accent); border:none; border-radius:8px;
           padding:9px 20px; color:#000; font-family:var(--mono); font-size:12px; font-weight:700;
-          cursor:pointer; letter-spacing:.06em">Connect</button>
+          cursor:pointer; letter-spacing:.06em">连接</button>
       </div>
     </div>
   </div>
@@ -538,8 +533,8 @@
     const h = Math.floor(secs / 3600);
     const m = Math.floor((secs % 3600) / 60);
     const s = secs % 60;
-    if (h > 0) return `${h}h ${m}m`;
-    return `${m}m ${s}s`;
+    if (h > 0) return `${h}小时${m}分`;
+    return `${m}分${s}秒`;
   }
 
   function renderAMS(ams) {
@@ -566,29 +561,24 @@
   function render(data) {
     const online = !!data.online;
 
-    // dot
     const dot = document.getElementById('dot');
     const conn = document.getElementById('conn-status');
     dot.className = 'dot' + (online ? ' online' : '');
     conn.textContent = online ? '打印机在线' : '离线';
     conn.style.color = online ? 'var(--accent)' : 'var(--err)';
 
-    // offline banner
     document.getElementById('offline-banner').className = 'offline-banner' + (online ? '' : ' show');
 
-    // ── Hero progress ──
     const st = data.gcode_state || 'UNKNOWN';
     const pct = data.progress || 0;
     const jn = data.job_name || '';
     const lc = data.layer_current || 0;
     const lt = data.layer_total || 0;
 
-    // Badge & state
     const badgeEl = document.getElementById('hero-badge');
     const stateText = document.getElementById('hero-state-text');
     const isPrinting = ['RUNNING','打印中'].includes(st);
     const isFinish   = ['FINISH','COMPLETED','SUCCESS'].includes(st);
-    const isIdle     = ['待机','UNKNOWN','PREPARE'].includes(st);
     if (isFinish) {
       badgeEl.className = 'hero-state-badge finish';
       stateText.textContent = '已完成';
@@ -600,23 +590,19 @@
       stateText.textContent = '待机';
     }
 
-    // Job name
     const jnEl = document.getElementById('hero-job-name');
     jnEl.textContent = jn || '暂无打印任务';
     jnEl.className = 'hero-job-name' + (jn ? '' : ' empty');
 
-    // Big pct
     document.getElementById('hero-pct').textContent = Math.round(pct) + '%';
     document.getElementById('hero-bar-fill').style.width = pct + '%';
 
-    // Meta row
     document.getElementById('hero-eta').textContent = fmtTime(data.remaining_time) || '—';
     document.getElementById('hero-layer').textContent = (lc && lt) ? `${lc} / ${lt}` : '—';
     document.getElementById('hero-speed').textContent = data.speed || '—';
     document.getElementById('hero-remain').textContent = data.remaining_time > 0 ? fmtTime(data.remaining_time) : '—';
     document.getElementById('hero-updated').textContent = data.last_update || '—';
 
-    // temps — preserve target temps from pushall when short push omits them
     const nt = data.nozzle_temp;
     if (data.nozzle_target !== undefined) _prevNozzleTgt = data.nozzle_target;
     if (data.bed_target !== undefined) _prevBedTgt = data.bed_target;
@@ -640,15 +626,13 @@
     bedArc.className = 'gauge-fg ' + bc.arcCls;
     bedArc.style.strokeDasharray = arcPct(bt, btg, 120) + ' ' + CIRC;
 
-    // speed gauge
     const spd = data.live_speed || 0;
     const spdArc = document.getElementById('speed-arc');
     spdArc.className = 'gauge-fg ' + (spd > 200 ? 'hot' : spd > 100 ? 'warm' : 'cool');
     spdArc.style.strokeDasharray = Math.min(spd / 300, 1) * CIRC + ' ' + CIRC;
     document.getElementById('speed-val').textContent = spd > 0 ? spd : '—';
 
-    // stats
-    const st2 = data.gcode_state || 'UNKNOWN';
+    // State badges
     const badges = {
       '打印中':  'badge-print',
       'RUNNING':   'badge-print',
@@ -657,33 +641,36 @@
       'PAUSED':    'badge-pause',
       'FINISH':    'badge-finish',
       'COMPLETED': 'badge-finish',
+      'SUCCESS':   'badge-finish',
       'ERROR':     'badge-error',
+      'FAIL':      'badge-error',
       'cooling':   'badge-cool',
     };
-    const cls = badges[st2.toLowerCase()] || 'badge-default';
     const labels = {
-      'printing': '🖨 Printing',
-      'running': '🖨 Printing',
-      'idle': '⏸ Idle',
-      'pause': '⏸ Paused',
-      'paused': '⏸ Paused',
-      'finish': '✅ Finished',
-      '完成d': '✅ Completed',
-      'error': '❌ Error',
-      'cooling': '❄ Cooling',
+      'printing':  '🖨 打印中',
+      'running':   '🖨 打印中',
+      'idle':     '⏸ 待机',
+      'pause':    '⏸ 已暂停',
+      'paused':   '⏸ 已暂停',
+      'finish':   '✅ 已完成',
+      'completed':'✅ 已完成',
+      'success':  '✅ 已完成',
+      'error':    '❌ 错误',
+      'fail':     '❌ 失败',
+      'cooling':  '❄ 降温中',
     };
+    const cls = badges[st.toLowerCase()] || 'badge-default';
     document.getElementById('state-badges').innerHTML =
-      `<span class="badge ${cls}">${labels[st2.toLowerCase()] || st}</span>`;
+      `<span class="badge ${cls}">${labels[st.toLowerCase()] || st}</span>`;
 
     document.getElementById('stat-remaining').textContent = fmtTime(data.remaining_time);
     document.getElementById('stat-layer').textContent = `${lc} / ${lt}`;
     document.getElementById('stat-filament').textContent = data.filament_type || '—';
 
-    // ams
     renderAMS(data.ams || {});
   }
 
-  // SSE
+  // SSE connection
   const src = new EventSource('/events');
   src.onmessage = e => {
     try { render(JSON.parse(e.data)); } catch {}
@@ -702,7 +689,6 @@
   // Settings modal
   function openCfg() {
     document.getElementById('cfg-modal').style.display = 'flex';
-    // fetch current config hint
     fetch('/api/config').then(r=>r.json()).then(d=>{
       if(d.host) document.getElementById('cfg-host').value = d.host;
       if(d.serial) document.getElementById('cfg-serial').value = d.serial;
@@ -714,7 +700,7 @@
     var serial = document.getElementById('cfg-serial').value.trim();
     var code = document.getElementById('cfg-code').value;
     var msg = document.getElementById('cfg-msg');
-    if (!host || !serial) { msg.textContent = 'IP and Serial are required'; return; }
+    if (!host || !serial) { msg.textContent = '请填写 IP 和序列号'; return; }
     msg.textContent = '连接中…';
     try {
       var r = await fetch('/api/config', {
@@ -723,10 +709,10 @@
       }).then(r=>r.json());
       if (r.ok) {
         msg.style.color = 'var(--accent)';
-        msg.textContent = 'Reconnecting to printer…';
+        msg.textContent = '正在重新连接打印机…';
         setTimeout(closeCfg, 1200);
       }
-    } catch(e) { msg.textContent = 'Error: ' + e; }
+    } catch(e) { msg.textContent = '错误: ' + e; }
   }
 
 </script>
