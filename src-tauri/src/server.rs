@@ -8,7 +8,7 @@
 //!   GET  /              — serve index.html
 
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Arc;
@@ -498,25 +498,6 @@ fn serve_http(listener: std::net::TcpListener, shared: Arc<SharedState>) {
     }
 }
 
-pub fn start_http_server(shared: Arc<SharedState>) -> JoinHandle<()> {
-    let listener = (5001u16..=5003)
-        .find_map(|port| {
-            std::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port)))
-                .ok()
-        });
-
-    let Some(listener) = listener else {
-        log::error!("All HTTP ports (5001-5003) are in use. Backend will not be accessible.");
-        return thread::spawn(move || {});
-    };
-
-    let bound_port = listener.local_addr().map(|a| a.port()).unwrap_or(5001);
-    log::info!("HTTP server starting on port {}", bound_port);
-
-    thread::spawn(move || {
-        serve_http(listener, shared);
-    })
-}
 
 // ── HTTP response helpers (raw TCP) ─────────────────────────────────────────
 
