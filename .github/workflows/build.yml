@@ -8,6 +8,9 @@ on:
         required: false
         default: '0.1.0'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -34,7 +37,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -49,14 +52,13 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Setup Python (for backend)
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: Install Python dependencies
-        run: |
-          pip install flask paho-mqtt
+        run: pip install flask paho-mqtt
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -81,17 +83,19 @@ jobs:
           args: ${{ matrix.args }}
 
       - name: Upload macOS artifact
-        if: matrix.platform == 'macos-latest'
+        if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
           name: BambuMonitor-${{ matrix.label }}
           path: |
             src-tauri/target/aarch64-apple-darwin/release/bundle/macos/BambuMonitor.app.tar.gz
             src-tauri/target/x86_64-apple-darwin/release/bundle/macos/BambuMonitor.app.tar.gz
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: warn
 
       - name: Upload Windows artifact
-        if: matrix.platform == 'windows-latest'
+        if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: BambuMonitor-${{ matrix.label }}
