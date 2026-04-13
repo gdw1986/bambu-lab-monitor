@@ -21,14 +21,15 @@ jobs:
             target: x86_64-pc-windows-msvc
           - platform: macos-latest
             target: x86_64-apple-darwin
-            apply-default-toolchain: true
           - platform: macos-latest
             target: aarch64-apple-darwin
-            apply-default-toolchain: true
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
 
     runs-on: ${{ matrix.platform }}
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout
@@ -41,17 +42,10 @@ jobs:
           cache: 'npm'
           cache-dependency-path: 'package-lock.json'
 
-      - name: Fix tauri.conf.json (disable devtools for faster builds)
-        if: matrix.platform != 'windows-latest'
-        run: |
-          cd src-tauri
-          $conf = Get-Content tauri.conf.json -Raw | ConvertFrom-Json
-          $conf.tauri.bundle.active = $true
-          $conf | ConvertTo-Json -Depth 10 | Set-Content tauri.conf.json -Encoding utf8
-
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
+          targets: ${{ matrix.target }}
           profile: minimal
 
       - name: Rust cache
@@ -67,10 +61,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd src-tauri
-          $target = '${{ matrix.target }}'
-          $extraArgs = @()
-          if ($target -ne '') { $extraArgs = @('--target', $target) }
-          npx --yes tauri build --ci @extraArgs
+          npx tauri build --target '${{ matrix.target }}'
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
