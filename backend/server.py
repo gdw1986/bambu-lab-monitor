@@ -6,12 +6,27 @@ Connects to printer via MQTT (TLS), pushes status to browser via SSE.
 import json
 import os
 import re
+import socket
 import threading
 import time
 import logging
 from flask import Flask, Response, render_template, request, jsonify
 import ssl
 import paho.mqtt.client as mqtt
+
+
+def find_free_port(start=5001, end=5010):
+    """Bind a TCP socket to find the first free port in the range."""
+    for port in range(start, end + 1):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind(('0.0.0.0', port))
+            s.close()
+            return port
+        except OSError:
+            pass
+    raise RuntimeError(f"No free port found in range {start}–{end}")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 log = logging.getLogger(__name__)
@@ -329,13 +344,15 @@ def index():
 
 
 if __name__ == '__main__':
-    print(f"Dashboard: http://localhost:5001")
+    port = find_free_port()
+    print(f"Dashboard: http://localhost:{port}")
+    print(f"PORT={port}")   # Tauri reads this to call get_http_port
     try:
         start_mqtt()
     except Exception as e:
         print(f"[demo mode] MQTT unavailable: {e}")
         print("         Starting in demo mode. Edit server.py to configure printer.")
-    app.run(host='0.0.0.0', port=5001, threaded=True, debug=False)
+    app.run(host='0.0.0.0', port=port, threaded=True, debug=False)
 
 def request_full_status():
     """Request full status push from printer"""

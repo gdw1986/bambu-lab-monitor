@@ -312,6 +312,49 @@
   .offline-banner.show { display: block; animation: fadeIn .4s; }
   @keyframes fadeIn { from { opacity:0; transform: translateY(-6px); } to { opacity:1; transform: none; } }
 
+  /* ── Loading / Error screens ── */
+  .screen-cover {
+    position: fixed; inset: 0; z-index: 200;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: var(--bg); gap: 20px;
+  }
+  .spinner {
+    width: 40px; height: 40px;
+    border: 3px solid rgba(0,212,170,.15); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .screen-title { font-family: var(--mono); font-size: 14px; font-weight: 600; color: var(--accent); letter-spacing: .1em; }
+  .screen-sub { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: .06em; }
+  .screen-err {
+    background: rgba(255,71,87,.08); border: 1px solid rgba(255,71,87,.3);
+    border-radius: 12px; padding: 16px 28px;
+    font-family: var(--mono); font-size: 12px; color: var(--err);
+    text-align: center; max-width: 400px; line-height: 1.7;
+  }
+  .screen-btn {
+    background: rgba(0,212,170,.12); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 8px 20px;
+    color: var(--accent); font-family: var(--mono); font-size: 12px; cursor: pointer;
+    letter-spacing: .06em; transition: background .2s;
+  }
+  .screen-btn:hover { background: rgba(0,212,170,.22); }
+
+  /* ── Reconnecting banner ── */
+  .reconnect-banner {
+    background: rgba(255,184,0,.08); border: 1px solid rgba(255,184,0,.3);
+    border-radius: 10px; padding: 10px 20px;
+    font-family: var(--mono); font-size: 11px; color: var(--warn);
+    display: none; align-items: center; gap: 8px; margin-bottom: 16px;
+    animation: fadeIn .4s;
+  }
+  .reconnect-banner.show { display: flex; }
+  .reconnect-banner .spinner-sm {
+    width: 12px; height: 12px;
+    border: 2px solid rgba(255,184,0,.2); border-top-color: var(--warn);
+    border-radius: 50%; animation: spin .9s linear infinite; flex-shrink: 0;
+  }
+
   /* ── Animations ── */
   .fade-in { animation: fadeIn .5s ease; }
   .slide-up { animation: slideUp .5s cubic-bezier(.22,1,.36,1); }
@@ -319,6 +362,14 @@
 </style>
 </head>
 <body>
+
+<!-- Loading / Error overlay (shown until backend connects) -->
+<div class="screen-cover" id="screen">
+  <div class="spinner"></div>
+  <div class="screen-title" id="screen-title">正在启动后端服务…</div>
+  <div class="screen-sub"  id="screen-sub">请稍等</div>
+</div>
+
 <div class="wrap">
 
   <header>
@@ -329,6 +380,11 @@
       <span id="conn-status">连接中…</span>
     </div>
   </header>
+
+  <div class="reconnect-banner" id="reconnect-banner">
+    <div class="spinner-sm"></div>
+    <span id="reconnect-msg">后端未响应，正在重连…</span>
+  </div>
 
   <div class="offline-banner" id="offline-banner">
     ⚠ 连接中断，正在等待打印机重连…
@@ -512,6 +568,154 @@
 
 
 <script>
+  // ── UI helpers ────────────────────────────────────────────────────────────
+  function showScreen(title, sub, err) {
+    const s = document.getElementById('screen');
+    document.getElementById('screen-title').textContent = title;
+    document.getElementById('screen-sub').textContent = sub || '';
+    // replace screen body
+    const orig = s.querySelector('.spinner');
+    if (orig) orig.remove();
+    if (s.querySelector('.screen-err')) s.querySelector('.screen-err').remove();
+    if (s.querySelector('.screen-btn')) s.querySelector('.screen-btn').remove();
+    if (err) {
+      const div = document.createElement('div');
+      div.className = 'screen-err'; div.textContent = err;
+      s.appendChild(div);
+    }
+    s.style.display = 'flex';
+  }
+
+  function hideScreen() {
+    const s = document.getElementById('screen');
+    if (s) { s.style.display = 'none'; }
+  }
+
+  function showReconnect(msg) {
+    document.getElementById('reconnect-msg').textContent = msg || '后端未响应，正在重连…';
+    document.getElementById('reconnect-banner').classList.add('show');
+  }
+
+  function hideReconnect() {
+    document.getElementById('reconnect-banner').classList.remove('show');
+  }
+
+  // ── Backend port resolution + SSE connection ──────────────────────────────
+  async function connect() {
+    // Step 1: resolve port
+    let port = 0;
+    try {
+      const { invoke } = window.__TAURI__ || {};
+      if (invoke) {
+        port = await invoke('get_http_port');
+      }
+    } catch (e) {
+      // Not in Tauri, try polling a known range
+      for (let p = 5001; p <= 5010; p++) {
+        try {
+          const r = await fetch(`http://localhost:${p}/api/status`, {signal: AbortSignal.timeout(800)});
+          if (r.ok) { port = p; break; }
+        } catch {}
+      }
+    }
+
+    if (!port) {
+      showScreen(
+        '后端服务未启动',
+        '',
+        '无法连接到后端服务。\n请确保 Bambu Monitor 已启动，或尝试重新安装。'
+      );
+      return;
+    }
+
+    const base = `http://localhost:${port}`;
+    hideScreen();
+
+    // Step 2: SSE with auto-reconnect
+    let retryDelay = 1500;
+    let retryTimer = null;
+
+    function connectSSE() {
+      if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+      hideReconnect();
+
+      const src = new EventSource(base + '/events');
+
+      src.onmessage = e => {
+        try {
+          render(JSON.parse(e.data));
+          // On first successful message, reset retry backoff
+          retryDelay = 1500;
+        } catch {}
+      };
+
+      src.onerror = () => {
+        src.close();
+        showReconnect('后端连接中断，正在重连…');
+        retryTimer = setTimeout(connectSSE, retryDelay);
+        retryDelay = Math.min(retryDelay * 1.5, 20000);
+      };
+    }
+
+    connectSSE();
+
+    // Fallback HTTP poll every 8s when SSE is down
+    setInterval(async () => {
+      try {
+        const r = await fetch(base + '/api/status');
+        if (r.ok) render(await r.json());
+      } catch {}
+    }, 8000);
+  }
+
+  // ── Settings modal ────────────────────────────────────────────────────────
+  function openCfg() {
+    document.getElementById('cfg-modal').style.display = 'flex';
+    fetchCfg();
+  }
+
+  async function fetchCfg() {
+    try {
+      const { invoke } = window.__TAURI__ || {};
+      let port = 0;
+      if (invoke) { port = await invoke('get_http_port'); }
+      if (!port) return;
+      const r = await fetch(`http://localhost:${port}/api/config`);
+      const d = await r.json();
+      if (d.host) document.getElementById('cfg-host').value = d.host;
+      if (d.serial) document.getElementById('cfg-serial').value = d.serial;
+    } catch {}
+  }
+
+  function closeCfg() { document.getElementById('cfg-modal').style.display = 'none'; }
+
+  async function saveCfg() {
+    const host = document.getElementById('cfg-host').value.trim();
+    const serial = document.getElementById('cfg-serial').value.trim();
+    const code = document.getElementById('cfg-code').value;
+    const msg = document.getElementById('cfg-msg');
+    if (!host || !serial) { msg.textContent = '请填写 IP 和序列号'; return; }
+    msg.textContent = '连接中…'; msg.style.color = 'var(--err)';
+    try {
+      const { invoke } = window.__TAURI__ || {};
+      let port = 0;
+      if (invoke) { port = await invoke('get_http_port'); }
+      if (!port) { msg.textContent = '后端未就绪，无法保存'; return; }
+      const r = await fetch(`http://localhost:${port}/api/config`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({host, serial, access_code: code})
+      });
+      const d = await r.json();
+      if (d.ok) {
+        msg.style.color = 'var(--accent)'; msg.textContent = '配置已保存，正在重连…';
+        setTimeout(closeCfg, 1500);
+      } else {
+        msg.textContent = '保存失败，请重试';
+      }
+    } catch(e) { msg.textContent = '错误: ' + e; }
+  }
+
+  // ── Render helpers ────────────────────────────────────────────────────────
   const CIRC = 2 * Math.PI * 45; // SVG arc circumference (r=45)
 
   function arcPct(val, target, maxT) {
@@ -670,78 +874,8 @@
     renderAMS(data.ams || {});
   }
 
-  // SSE connection
-  // Resolve backend port dynamically (Tauri command)
-  const API_BASE = (async () => {
-    try {
-      const { invoke } = window.__TAURI__ || {};
-      if (invoke) {
-        const port = await invoke('get_http_port');
-        return port ? `http://localhost:${port}` : '';
-      }
-    } catch {}
-    return '';
-  })();
-
-  async function apiUrl(path) {
-    const base = await API_BASE;
-    return base + path;
-  }
-
-  // SSE connection
-  (async () => {
-    const base = await API_BASE;
-    if (!base) return;
-    const src = new EventSource(base + '/events');
-    src.onmessage = e => {
-      try { render(JSON.parse(e.data)); } catch {}
-    };
-    src.onerror = () => {
-      document.getElementById('conn-status').textContent = '重连中…';
-    };
-
-    // Poll fallback
-    setInterval(async () => {
-      if (src.readyState === EventSource.CLOSED) {
-        const url = await apiUrl('/api/status');
-        if (url) fetch(url).then(r=>r.json()).then(render).catch(()=>{});
-      }
-    }, 5000);
-  })();
-
-  // Settings modal
-  function openCfg() {
-    document.getElementById('cfg-modal').style.display = 'flex';
-    apiUrl('/api/config').then(url => {
-      if (!url) return;
-      fetch(url).then(r=>r.json()).then(d=>{
-        if(d.host) document.getElementById('cfg-host').value = d.host;
-        if(d.serial) document.getElementById('cfg-serial').value = d.serial;
-      }).catch(()=>{});
-    });
-  }
-  function closeCfg() { document.getElementById('cfg-modal').style.display = 'none'; }
-  async function saveCfg() {
-    var host = document.getElementById('cfg-host').value.trim();
-    var serial = document.getElementById('cfg-serial').value.trim();
-    var code = document.getElementById('cfg-code').value;
-    var msg = document.getElementById('cfg-msg');
-    if (!host || !serial) { msg.textContent = '请填写 IP 和序列号'; return; }
-    msg.textContent = '连接中…';
-    try {
-      const url = await apiUrl('/api/config');
-      if (!url) { msg.textContent = '后端未就绪'; return; }
-      var r = await fetch(url, {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({host, serial, access_code: code})
-      }).then(r=>r.json());
-      if (r.ok) {
-        msg.style.color = 'var(--accent)';
-        msg.textContent = '正在重新连接打印机…';
-        setTimeout(closeCfg, 1200);
-      }
-    } catch(e) { msg.textContent = '错误: ' + e; }
-  }
+  // Boot
+  connect();
 
 </script>
 </body>
