@@ -1,91 +1,101 @@
 # 🖨 Bambu Lab Monitor
 
-Bambu Lab 3D 打印机实时监控桌面应用。macOS 状态栏图标实时显示打印状态，打印完成时推送系统通知。
+Bambu Lab 3D 打印机实时监控桌面应用。托盘图标实时显示打印进度，打印完成时推送系统通知。零依赖，单文件运行。
 
 ## 功能
 
 - 🔥 实时温度监控（喷头 / 热床）
 - 📊 打印进度 + 层数显示
 - 🎨 AMS 耗材槽位状态
-- 🖥 macOS 菜单栏图标 — 颜色随状态变化
+- 🖥 托盘图标 — 颜色随状态变化
   - 🟡 琥珀色 = 打印中
   - 🟢 青绿 = 已完成
   - 🟠 橙色 = 已暂停
   - 🔴 红色 = 错误
 - 🔔 打印完成系统通知
-- 🌐 同时提供 Web 仪表盘（Flask SSE）
+
+## 下载
+
+前往 [Releases](https://github.com/gdw1986/bambu-lab-monitor/releases) 页面下载对应平台的安装包。
+
+| 平台 | 架构 | 格式 |
+|------|------|------|
+| Windows | x64 | `.exe` / `.msi` |
+| macOS | x64 / ARM64 | `.dmg` |
+
+## 配置
+
+启动前设置以下环境变量：
+
+| 变量 | 说明 | 示例 |
+|------|------|------|
+| `BAMBU_IP` | 打印机 IP 地址 | `192.168.1.87` |
+| `BAMBU_SN` | 设备序列号 | `XX0XX0XX0XX0` |
+| `BAMBU_CODE` | 局域网访问码 | `your_access_code` |
+
+**获取方式：**
+1. Bambu Studio → 设备 → 开启**局域网模式**
+2. 网络信息 → 复制**局域网访问码**和**序列号**
+
+### macOS / Linux
+
+```bash
+export BAMBU_IP=192.168.1.87
+export BAMBU_SN=XX0XX0XX0XX0
+export BAMBU_CODE=your_access_code
+./BambuMonitor
+```
+
+### Windows (PowerShell)
+
+```powershell
+$env:BAMBU_IP="192.168.1.87"
+$env:BAMBU_SN="XX0XX0XX0XX0"
+$env:BAMBU_CODE="your_access_code"
+.\BambuMonitor.exe
+```
 
 ## 技术栈
 
 | 层 | 技术 |
 |---|---|
 | 桌面端 | Tauri 2 (Rust) + TypeScript + Vite |
-| 后端 | Python 3 + Flask + paho-mqtt |
-| 通信 | MQTT (TLS 8883) + SSE (Server-Sent Events) |
+| 后端 | 纯 Rust（axum + rumqttc） |
+| 通信 | MQTT (TLS 8883) |
 | 协议 | Bambu Lab LAN Mode MQTT |
-
-## 快速开始
-
-### 1. 启动 Python 后端
-
-```bash
-cd backend
-python3 -m venv venv
-source venv/bin/activate
-pip install flask paho-mqtt
-```
-
-编辑 `server.py` 修改打印机配置：
-
-```python
-PRINTER_IP = "192.168.1.87"      # 你的打印机 IP
-ACCESS_CODE = "your_access_code"  # Bambu Studio → 设备 → 局域网访问码
-DEVICE_SN   = "your_serial_no"    # 设备序列号
-```
-
-```bash
-python3 server.py
-# Dashboard: http://localhost:5001
-```
-
-### 2. 启动 Tauri 桌面端
-
-```bash
-# 前置：Rust 工具链
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-npm install
-npm run tauri dev
-```
-
-### 3. 单独使用 Web 仪表盘
-
-不需要 Tauri，直接运行 Python 后端，浏览器打开 `http://localhost:5001`。
 
 ## 项目结构
 
 ```
-├── backend/
-│   ├── server.py              # Flask + MQTT 后端
-│   └── templates/index.html   # Web 仪表盘 (备用)
 ├── src-tauri/
 │   ├── src/
 │   │   ├── lib.rs             # Tauri 入口，Tray/菜单/窗口
-│   │   └── python_backend.rs  # Python 子进程管理 + 状态轮询 + 图标更新
+│   │   ├── server.rs          # Rust HTTP + MQTT 客户端
+│   │   └── tray_icon.rs      # 托盘图标渲染（含进度环）
 │   ├── Cargo.toml
 │   └── tauri.conf.json
 ├── src/
 │   └── main.ts
-├── index.html                 # 仪表盘前端
+├── index.html                 # 前端界面
 ├── package.json
 └── vite.config.ts
 ```
 
-## 打印机配置
+## 开发
 
-1. 在 Bambu Studio 中开启 **局域网模式** (LAN Mode)
-2. 获取 **访问码** (Access Code)：设备设置 → 网络信息 → 局域网访问码
-3. 确认打印机固件版本 ≥ 1.7.0.86
+### 环境要求
+
+- Node.js 20+
+- Rust 1.70+
+- Windows: Visual Studio Build Tools
+- macOS: Xcode Command Line Tools
+
+### 本地运行
+
+```bash
+npm install
+npm run tauri dev
+```
 
 ## License
 
