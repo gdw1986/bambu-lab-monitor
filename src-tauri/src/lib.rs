@@ -197,6 +197,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![send_notification, get_http_port, get_debug_info])
         .setup(|app| {
+            eprintln!("[SETUP] app data dir = {:?}", app.path().app_data_dir());
             info!("=== Bambu Monitor setup starting ===");
 
             setup_tray(app.handle()).map_err(|e| {

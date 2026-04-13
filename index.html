@@ -616,48 +616,43 @@
   }
 
   async function connect() {
-    // Step 1: resolve port (with retry — HTTP server may still be binding)
+    // Step 1: resolve port — keep retrying for up to 12s
     let port = 0;
-    let debugInfo = '';
-    const diag = async () => {
+    let invokeError = '';
+    const { invoke } = window.__TAURI__ || {};
+    if (!invoke) {
+      showScreen('错误', '', 'Tauri API 未就绪（window.__TAURI__ 不存在）\n这通常是打包问题，请尝试重新安装。');
+      return;
+    }
+    showScreen('正在启动后端服务…', '初始化中…', '');
+    for (let retry = 0; retry < 24; retry++) {
       try {
-        const { invoke } = window.__TAURI__ || {};
-        if (invoke) {
-          debugInfo = await invoke('get_debug_info').catch(() => 'invoke_failed');
-        }
-      } catch {}
-    };
-    showScreen('正在启动后端服务…', '', '请稍候…\n' + debugInfo);
-    try {
-      const { invoke } = window.__TAURI__ || {};
-      if (invoke) {
-        for (let retry = 0; retry < 20; retry++) {
-          await diag();
-          port = await invoke('get_http_port').catch(() => 0);
-          if (port !== 0) break;
-          await new Promise(r => setTimeout(r, 500));
-          showScreen('正在启动后端服务…', `重试 ${retry + 1}/20`, debugInfo);
-        }
+        port = await invoke('get_http_port');
+        if (port !== 0) break;
+        const info = await invoke('get_debug_info').catch(() => '');
+        showScreen('正在启动后端服务…', `等待中 ${retry + 1}/24`, info || '');
+      } catch (e) {
+        invokeError = e?.message || String(e);
+        showScreen('后端未就绪（重试中）', `${retry + 1}/24`, `invoke 错误: ${invokeError}\n后端可能正在启动…`);
       }
-    } catch (e) {}
+      if (port === 0) await new Promise(r => setTimeout(r, 500));
+    }
     if (!port) {
-      await diag();
       showScreen(
         '后端服务未启动',
         '',
-        '诊断信息：\n' + (debugInfo || '(无法获取)') + '\n\n无法连接到后端服务。请查看上方诊断信息并汇报。'
+        `invoke('get_http_port') 返回 0（共重试 24 次）\n最后错误: ${invokeError || '(无)'}\n\n请将上方内容汇报给开发者。`
       );
       return;
     }
 
-    // Step 1b: wait for backend to be fully ready
+    // Step 1b: wait for backend HTTP to respond
     const ready = await waitForBackend(port);
     if (!ready) {
-      await diag();
       showScreen(
-        '后端服务启动失败',
+        '后端服务无响应',
         '',
-        '诊断信息：\n' + (debugInfo || '(无法获取)') + '\n\n后端服务无法正常响应。请查看控制台日志。'
+        `HTTP 服务已启动（端口 ${port}）但 /api/health 未响应。\n请查看终端日志。`
       );
       return;
     }
