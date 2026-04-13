@@ -10,11 +10,14 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+
+/// Module-level HTTP server port, written once at bind time, read by Tauri commands.
+static HTTP_PORT: AtomicU16 = AtomicU16::new(0);
 
 use chrono::Local;
 use rumqttc::{AsyncClient, Event as MqttEvent, MqttOptions, Packet, QoS};
@@ -470,24 +473,16 @@ fn handle_connection(
     Ok(())
 }
 
-fn serve_http(addr: SocketAddr, shared: Arc<SharedState>) {
-    use std::net::TcpListener;
-
-    let listener = match TcpListener::bind(addr) {
-        Ok(l) => l,
-        Err(e) => {
-            log::error!("Failed to bind HTTP server to {}: {}", addr, e);
-            return;
-        }
-    };
+fn serve_http(listener: std::net::TcpListener, shared: Arc<SharedState>) {
+    let bound_port = listener.local_addr().map(|a| a.port()).unwrap_or(5001);
+    HTTP_PORT.store(bound_port, Ordering::SeqCst);
+    log::info!("HTTP listening on http://0.0.0.0:{}", bound_port);
     listener.set_nonblocking(true).ok();
-    log::info!("HTTP listening on http://{}", addr);
 
     loop {
         match listener.accept() {
             Ok((stream, _)) => {
                 let shared = shared.clone();
-                // Handle each connection in a dedicated thread
                 thread::spawn(move || {
                     handle_connection(stream, &shared).ok();
                 });
@@ -501,6 +496,26 @@ fn serve_http(addr: SocketAddr, shared: Arc<SharedState>) {
             }
         }
     }
+}
+
+pub fn start_http_server(shared: Arc<SharedState>) -> JoinHandle<()> {
+    let listener = (5001u16..=5003)
+        .find_map(|port| {
+            std::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port)))
+                .ok()
+        });
+
+    let Some(listener) = listener else {
+        log::error!("All HTTP ports (5001-5003) are in use. Backend will not be accessible.");
+        return thread::spawn(move || {});
+    };
+
+    let bound_port = listener.local_addr().map(|a| a.port()).unwrap_or(5001);
+    log::info!("HTTP server starting on port {}", bound_port);
+
+    thread::spawn(move || {
+        serve_http(listener, shared);
+    })
 }
 
 // ── HTTP response helpers (raw TCP) ─────────────────────────────────────────
@@ -686,8 +701,25 @@ fn serve_sse_sync(
 // ── HTTP server entry point (runs in a dedicated thread) ─────────────────────
 
 pub fn start_http_server(shared: Arc<SharedState>) -> JoinHandle<()> {
-    let addr = SocketAddr::from(([0, 0, 0, 0], 5001));
+    let listener = (5001u16..=5003)
+        .find_map(|port| {
+            std::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).ok()
+        });
+
+    let Some(listener) = listener else {
+        log::error!("All HTTP ports (5001-5003) are in use. Backend will not be accessible.");
+        return thread::spawn(move || {});
+    };
+
+    let bound_port = listener.local_addr().map(|a| a.port()).unwrap_or(5001);
+    log::info!("HTTP server starting on port {}", bound_port);
+
     thread::spawn(move || {
-        serve_http(addr, shared);
+        serve_http(listener, shared);
     })
+}
+
+/// Read the current HTTP server port (0 if not started yet).
+pub fn http_port() -> u16 {
+    HTTP_PORT.load(Ordering::SeqCst)
 }

@@ -166,6 +166,11 @@ async fn send_notification(app: AppHandle, title: String, body: String) -> Resul
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn get_http_port() -> u16 {
+    server::http_port()
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 static PRINT_WAS_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -178,7 +183,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![send_notification])
+        .invoke_handler(tauri::generate_handler![send_notification, get_http_port])
         .setup(|app| {
             setup_tray(app.handle())?;
 
@@ -191,6 +196,18 @@ pub fn run() {
             // HTTP server (tiny_http, runs in dedicated thread)
             let http_shared = shared.clone();
             start_http_server(http_shared);
+
+            // Wait for HTTP server to actually start before signaling frontend ready
+            let ready_app = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                for _ in 0..20 {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    if server::http_port() != 0 {
+                        let _ = ready_app.emit("backend-ready", ());
+                        break;
+                    }
+                }
+            });
 
             // MQTT client (rumqttc, async task)
             let mqtt_shared = shared.clone();
@@ -211,7 +228,10 @@ pub fn run() {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(6)).await;
 
-                    match client.get("http://localhost:5001/api/status").send().await {
+                    let port = server::http_port();
+                    if port == 0 { continue; }
+                    let url = format!("http://localhost:{}/api/status", port);
+                    match client.get(&url).send().await {
                         Ok(resp) => {
                             if let Ok(json) = resp.json::<serde_json::Value>().await {
                                 let state = json

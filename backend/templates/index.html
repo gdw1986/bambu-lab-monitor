@@ -671,28 +671,54 @@
   }
 
   // SSE connection
-  const src = new EventSource('/events');
-  src.onmessage = e => {
-    try { render(JSON.parse(e.data)); } catch {}
-  };
-  src.onerror = () => {
-    document.getElementById('conn-status').textContent = '重连中…';
-  };
+  // Resolve backend port dynamically (Tauri command)
+  const API_BASE = (async () => {
+    try {
+      const { invoke } = window.__TAURI__ || {};
+      if (invoke) {
+        const port = await invoke('get_http_port');
+        return port ? `http://localhost:${port}` : '';
+      }
+    } catch {}
+    return '';
+  })();
 
-  // Poll fallback
-  setInterval(() => {
-    if (src.readyState === EventSource.CLOSED) {
-      fetch('/api/status').then(r=>r.json()).then(render).catch(()=>{});
-    }
-  }, 5000);
+  async function apiUrl(path) {
+    const base = await API_BASE;
+    return base + path;
+  }
+
+  // SSE connection
+  (async () => {
+    const base = await API_BASE;
+    if (!base) return;
+    const src = new EventSource(base + '/events');
+    src.onmessage = e => {
+      try { render(JSON.parse(e.data)); } catch {}
+    };
+    src.onerror = () => {
+      document.getElementById('conn-status').textContent = '重连中…';
+    };
+
+    // Poll fallback
+    setInterval(async () => {
+      if (src.readyState === EventSource.CLOSED) {
+        const url = await apiUrl('/api/status');
+        if (url) fetch(url).then(r=>r.json()).then(render).catch(()=>{});
+      }
+    }, 5000);
+  })();
 
   // Settings modal
   function openCfg() {
     document.getElementById('cfg-modal').style.display = 'flex';
-    fetch('/api/config').then(r=>r.json()).then(d=>{
-      if(d.host) document.getElementById('cfg-host').value = d.host;
-      if(d.serial) document.getElementById('cfg-serial').value = d.serial;
-    }).catch(()=>{});
+    apiUrl('/api/config').then(url => {
+      if (!url) return;
+      fetch(url).then(r=>r.json()).then(d=>{
+        if(d.host) document.getElementById('cfg-host').value = d.host;
+        if(d.serial) document.getElementById('cfg-serial').value = d.serial;
+      }).catch(()=>{});
+    });
   }
   function closeCfg() { document.getElementById('cfg-modal').style.display = 'none'; }
   async function saveCfg() {
@@ -703,7 +729,9 @@
     if (!host || !serial) { msg.textContent = '请填写 IP 和序列号'; return; }
     msg.textContent = '连接中…';
     try {
-      var r = await fetch('/api/config', {
+      const url = await apiUrl('/api/config');
+      if (!url) { msg.textContent = '后端未就绪'; return; }
+      var r = await fetch(url, {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({host, serial, access_code: code})
       }).then(r=>r.json());
