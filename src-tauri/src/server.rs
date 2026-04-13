@@ -446,7 +446,7 @@ fn handle_connection(
     match (path, method) {
         ("/api/health", "GET") => {
             let body = r#"{"status":"ok"}"#;
-            write_http_ok(stream, body.as_bytes(), "application/json")?;
+            write_http_ok(&mut stream, body.as_bytes(), "application/json")?;
         }
         ("/" | "/index.html", "GET") => {
             serve_index_sync(&mut stream, shared)?;
