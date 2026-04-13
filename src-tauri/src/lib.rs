@@ -231,7 +231,6 @@ pub fn run() {
             });
 
             info!("=== Bambu Monitor setup complete ===");
-            Ok(())
 
             // Tray icon updater — polls /api/status every 6s
             let client = reqwest::Client::builder()
