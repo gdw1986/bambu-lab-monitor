@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bambu 打印机监控</title>
+<style>
+  :root {
+    --bg:        #0a0b0e;
+    --surface:   #13151a;
+    --border:    #1e2130;
+    --accent:    #00d4aa;
+    --accent2:   #ff6b35;
+    --warn:      #ffb800;
+    --err:       #ff4757;
+    --text:      #dde1e7;
+    --muted:     #5a6070;
+    --mono:      'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+    --sans:      'Inter', system-ui, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* subtle grid bg */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 40px 40px;
+    opacity: 0.35;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .wrap {
+    position: relative; z-index: 1;
+    max-width: 900px; margin: 0 auto;
+    padding: 32px 20px 60px;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 36px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  header .logo {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  header .logo span { color: var(--muted); }
+  .status-dot {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 11px; font-family: var(--mono);
+    letter-spacing: 0.08em;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--err);
+    box-shadow: 0 0 6px var(--err);
+    transition: background .4s, box-shadow .4s;
+  }
+  .dot.online { background: var(--accent); box-shadow: 0 0 10px var(--accent); animation: pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
+
+
+  /* ── Hero Progress ── */
+  .hero-progress {
+    background: linear-gradient(135deg, #1a1a1a 0%, #222 100%);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px 32px 20px;
+    margin-bottom: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero-progress::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(135deg, rgba(255,176,0,.06) 0%, transparent 60%);
+    pointer-events: none;
+  }
+  .hero-top {
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
+    margin-bottom: 16px;
+  }
+  .hero-left {}
+  .hero-state-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(0,255,136,.1); border: 1px solid rgba(0,255,136,.3);
+    color: #00ff88; border-radius: 99px;
+    font-size: 11px; font-family: var(--mono); letter-spacing: .08em;
+    padding: 4px 10px; margin-bottom: 8px;
+  }
+  .hero-state-badge.idle {
+    background: rgba(255,176,0,.1); border-color: rgba(255,176,0,.3);
+    color: #ffb000;
+  }
+  .hero-state-badge.finish {
+    background: rgba(0,212,170,.1); border-color: rgba(0,212,170,.3);
+    color: #00d4aa;
+  }
+  .hero-state-badge .dot-pulse {
+    width: 6px; height: 6px; background: currentColor; border-radius: 50%;
+    animation: pulse-dot 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse-dot {
+    0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.7)}
+  }
+  .hero-job-name {
+    font-size: 15px; color: var(--text); font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 480px;
+  }
+  .hero-job-name.empty { color: var(--muted); font-weight: 400; font-style: italic; }
+  .hero-right { text-align: right; flex-shrink: 0; }
+  .hero-pct {
+    font-family: var(--mono); font-size: 72px; font-weight: 700;
+    color: var(--accent); line-height: 1; letter-spacing: -.02em;
+    text-shadow: 0 0 40px rgba(255,176,0,.3);
+  }
+  .hero-pct-label { font-size: 13px; color: var(--muted); font-family: var(--mono); }
+  .hero-bar-wrap { position: relative; }
+  .hero-bar {
+    height: 10px; background: rgba(255,255,255,.08); border-radius: 99px; overflow: hidden;
+  }
+  .hero-bar-fill {
+    height: 100%; border-radius: 99px;
+    background: linear-gradient(90deg, #ffb000, #00ff88);
+    width: 0%; transition: width 1s cubic-bezier(.22,1,.36,1);
+    position: relative;
+  }
+  .hero-bar-fill::after {
+    content: ''; position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+    width: 16px; height: 16px; background: #fff; border-radius: 50%;
+    box-shadow: 0 0 12px rgba(255,176,0,.6);
+  }
+  .hero-meta {
+    display: flex; gap: 24px; margin-top: 12px; flex-wrap: wrap;
+  }
+  .hero-meta-item { display: flex; flex-direction: column; gap: 2px; }
+  .hero-meta-label { font-size: 10px; font-family: var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
+  .hero-meta-val { font-size: 15px; font-family: var(--mono); font-weight: 600; color: var(--text); }
+  .hero-eta-val { color: #00d4aa; }
+  .hero-layer-val { color: #fff; }
+  .hero-temp-val { color: #ffb000; }
+
+
+  /* ── Job card ── */
+  .job-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 32px;
+    margin-bottom: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .job-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 16px 16px 0 0;
+  }
+  .job-name {
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--text);
+    margin-bottom: 6px;
+    word-break: break-all;
+  }
+  .job-name.empty { color: var(--muted); font-style: italic; }
+  .job-meta {
+    font-size: 11px; color: var(--muted);
+    font-family: var(--mono); margin-bottom: 20px;
+    display: flex; gap: 16px; flex-wrap: wrap;
+  }
+
+  /* ── Progress bar ── */
+  .progress-wrap { margin-bottom: 6px; }
+  .progress-header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 8px;
+  }
+  .progress-label { font-size: 11px; font-family: var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
+  .progress-pct { font-family: var(--mono); font-size: 32px; font-weight: 700; color: var(--accent); line-height: 1; }
+  .progress-track {
+    height: 6px; background: var(--border); border-radius: 99px;
+    overflow: hidden; position: relative;
+  }
+  .progress-fill {
+    height: 100%; background: linear-gradient(90deg, var(--accent), #00ffcc);
+    border-radius: 99px; width: 0%; transition: width .8s cubic-bezier(.22,1,.36,1);
+    position: relative;
+  }
+  .progress-fill::after {
+    content: ''; position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+    width: 12px; height: 12px; background: #fff; border-radius: 50%;
+    box-shadow: 0 0 8px var(--accent);
+  }
+
+  /* ── Stats row ── */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .stat-label {
+    font-size: 10px; font-family: var(--mono);
+    text-transform: uppercase; letter-spacing: .1em;
+    color: var(--muted); margin-bottom: 8px;
+  }
+  .stat-val {
+    font-family: var(--mono); font-size: 22px; font-weight: 600; line-height: 1;
+  }
+  .stat-val.n { color: var(--accent); }
+  .stat-val.w { color: var(--warn); }
+  .stat-val.e { color: var(--err); }
+  .stat-val.m { color: var(--text); }
+  .stat-sub {
+    font-size: 11px; color: var(--muted); font-family: var(--mono);
+    margin-top: 4px;
+  }
+
+  /* ── Temp gauges ── */
+  .temps-row {
+    display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap;
+  }
+  .gauge-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    flex: 1; min-width: 160px;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .gauge-label { font-size: 10px; font-family: var(--mono); text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin-bottom: 16px; }
+  .gauge-wrap { position: relative; width: 110px; height: 110px; }
+  .gauge-svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .gauge-bg { fill: none; stroke: var(--border); stroke-width: 8; }
+  .gauge-fg {
+    fill: none; stroke-width: 8; stroke-linecap: round;
+    stroke-dasharray: 0 283; transition: stroke-dasharray .6s cubic-bezier(.22,1,.36,1);
+  }
+  .gauge-fg.hot  { stroke: var(--accent2); }
+  .gauge-fg.warm { stroke: var(--warn); }
+  .gauge-fg.cool { stroke: var(--accent); }
+  .gauge-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .gauge-temp { font-family: var(--mono); font-size: 20px; font-weight: 700; }
+  .gauge-tgt  { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 2px; }
+  .gauge-temp.h { color: var(--accent2); }
+  .gauge-temp.w { color: var(--warn); }
+  .gauge-temp.c { color: var(--accent); }
+
+  /* ── State badge ── */
+  .state-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 14px; border-radius: 99px;
+    font-family: var(--mono); font-size: 11px; font-weight: 600;
+    letter-spacing: .06em; text-transform: uppercase;
+    border: 1px solid;
+  }
+  .badge-print  { background: rgba(0,212,170,.1); border-color: var(--accent); color: var(--accent); }
+  .badge-idle   { background: rgba(90,96,112,.15); border-color: var(--muted); color: var(--muted); }
+  .badge-pause  { background: rgba(255,184,0,.1); border-color: var(--warn); color: var(--warn); }
+  .badge-finish { background: rgba(100,100,255,.1); border-color: #8888ff; color: #aaaaff; }
+  .badge-error  { background: rgba(255,71,87,.1); border-color: var(--err); color: var(--err); }
+  .badge-cool   { background: rgba(0,212,170,.1); border-color: var(--accent); color: var(--accent); }
+  .badge-default{ background: rgba(90,96,112,.15); border-color: var(--border); color: var(--text); }
+
+  /* ── AMS slots ── */
+  .ams-section { margin-top: 24px; }
+  .ams-title {
+    font-family: var(--mono); font-size: 11px; text-transform: uppercase;
+    letter-spacing: .1em; color: var(--muted); margin-bottom: 12px;
+  }
+  .ams-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+  .ams-slot {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 14px;
+  }
+  .ams-slot-header { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-bottom: 6px; }
+  .ams-color { display: flex; align-items: center; gap: 8px; }
+  .ams-dot { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+  .ams-mat { font-size: 11px; font-family: var(--mono); color: var(--text); }
+  .ams-remain { font-size: 10px; font-family: var(--mono); color: var(--muted); margin-top: 4px; }
+
+  /* ── Offline overlay ── */
+  .offline-banner {
+    background: rgba(255,71,87,.08); border: 1px solid rgba(255,71,87,.3);
+    border-radius: 10px; padding: 14px 20px;
+    font-family: var(--mono); font-size: 12px; color: var(--err);
+    margin-bottom: 24px; display: none;
+  }
+  .offline-banner.show { display: block; animation: fadeIn .4s; }
+  @keyframes fadeIn { from { opacity:0; transform: translateY(-6px); } to { opacity:1; transform: none; } }
+
+  /* ── Animations ── */
+  .fade-in { animation: fadeIn .5s ease; }
+  .slide-up { animation: slideUp .5s cubic-bezier(.22,1,.36,1); }
+  @keyframes slideUp { from { opacity:0; transform: translateY(16px); } to { opacity:1; transform: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="logo">Bambu <span>//</span> Monitor</div>
+    <button onclick="openCfg()" style="background:transparent; border:1px solid var(--border); border-radius:7px; padding:6px 14px; color:var(--muted); font-family:var(--mono); font-size:11px; cursor:pointer; letter-spacing:.06em; transition:border-color .2s,color .2s" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">⚙ Settings</button>
+    <div class="status-dot">
+      <span class="dot" id="dot"></span>
+      <span id="conn-status">连接中…</span>
+    </div>
+  </header>
+
+  <div class="offline-banner" id="offline-banner">
+    ⚠ 连接中断，正在等待打印机重连…
+  </div>
+
+  <!-- Hero Progress -->
+  <div class="hero-progress slide-up">
+    <div class="hero-top">
+      <div class="hero-left">
+        <div class="hero-state-badge idle" id="hero-badge">
+          <span class="dot-pulse"></span>
+          <span id="hero-state-text">待机</span>
+        </div>
+        <div class="hero-job-name empty" id="hero-job-name">暂无打印任务</div>
+      </div>
+      <div class="hero-right">
+        <div class="hero-pct" id="hero-pct">0%</div>
+        <div class="hero-pct-label">完成</div>
+      </div>
+    </div>
+    <div class="hero-bar-wrap">
+      <div class="hero-bar">
+        <div class="hero-bar-fill" id="hero-bar-fill"></div>
+      </div>
+    </div>
+    <div class="hero-meta">
+      <div class="hero-meta-item">
+        <span class="hero-meta-label">预计完成</span>
+        <span class="hero-meta-val hero-eta-val" id="hero-eta">—</span>
+      </div>
+      <div class="hero-meta-item">
+        <span class="hero-meta-label">层</span>
+        <span class="hero-meta-val hero-layer-val" id="hero-layer">—</span>
+      </div>
+      <div class="hero-meta-item">
+        <span class="hero-meta-label">速度档</span>
+        <span class="hero-meta-val" id="hero-speed">—</span>
+      </div>
+      <div class="hero-meta-item">
+        <span class="hero-meta-label">剩余时间</span>
+        <span class="hero-meta-val hero-eta-val" id="hero-remain">—</span>
+      </div>
+      <div class="hero-meta-item">
+        <span class="hero-meta-label">更新时间</span>
+        <span class="hero-meta-val" id="hero-updated">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Temps -->
+  <div class="temps-row">
+    <div class="gauge-card slide-up" style="animation-delay:.06s">
+      <div class="gauge-label">喷嘴</div>
+      <div class="gauge-wrap">
+        <svg class="gauge-svg" viewBox="0 0 100 100">
+          <circle class="gauge-bg" cx="50" cy="50" r="45"/>
+          <circle class="gauge-fg cool" id="nozzle-arc" cx="50" cy="50" r="45"/>
+        </svg>
+        <div class="gauge-center">
+          <span class="gauge-temp c" id="nozzle-val">—</span>
+          <span class="gauge-tgt" id="nozzle-tgt">—°C</span>
+        </div>
+      </div>
+    </div>
+    <div class="gauge-card slide-up" style="animation-delay:.1s">
+      <div class="gauge-label">热床</div>
+      <div class="gauge-wrap">
+        <svg class="gauge-svg" viewBox="0 0 100 100">
+          <circle class="gauge-bg" cx="50" cy="50" r="45"/>
+          <circle class="gauge-fg cool" id="bed-arc" cx="50" cy="50" r="45"/>
+        </svg>
+        <div class="gauge-center">
+          <span class="gauge-temp c" id="bed-val">—</span>
+          <span class="gauge-tgt" id="bed-tgt">—°C</span>
+        </div>
+      </div>
+    </div>
+    <div class="gauge-card slide-up" style="animation-delay:.14s">
+      <div class="gauge-label">速度档</div>
+      <div class="gauge-wrap">
+        <svg class="gauge-svg" viewBox="0 0 100 100">
+          <circle class="gauge-bg" cx="50" cy="50" r="45"/>
+          <circle class="gauge-fg cool" id="speed-arc" cx="50" cy="50" r="45"/>
+        </svg>
+        <div class="gauge-center">
+          <span class="gauge-temp c" id="speed-val">—</span>
+          <span class="gauge-tgt">mm/s</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-row">
+    <div class="stat-card slide-up" style="animation-delay:.16s">
+      <div class="stat-label">Status</div>
+      <div class="state-row" id="state-badges">
+        <span class="badge badge-idle">—</span>
+      </div>
+    </div>
+    <div class="stat-card slide-up" style="animation-delay:.2s">
+      <div class="stat-label">剩余时间</div>
+      <div class="stat-val m" id="stat-remaining">—</div>
+      <div class="stat-sub">hh:mm:ss</div>
+    </div>
+    <div class="stat-card slide-up" style="animation-delay:.24s">
+      <div class="stat-label">层</div>
+      <div class="stat-val m" id="stat-layer">— / —</div>
+      <div class="stat-sub">current / total</div>
+    </div>
+    <div class="stat-card slide-up" style="animation-delay:.28s">
+      <div class="stat-label">当前耗材</div>
+      <div class="stat-val m" id="stat-filament">—</div>
+      <div class="stat-sub">type</div>
+    </div>
+  </div>
+
+  <!-- AMS -->
+  <div class="ams-section">
+    <div class="ams-title">AMS 料槽</div>
+    <div class="ams-grid" id="ams-grid">
+      <div class="ams-slot"><div class="ams-slot-header">Slot 1</div><div class="ams-mat">—</div></div>
+      <div class="ams-slot"><div class="ams-slot-header">Slot 2</div><div class="ams-mat">—</div></div>
+      <div class="ams-slot"><div class="ams-slot-header">Slot 3</div><div class="ams-mat">—</div></div>
+      <div class="ams-slot"><div class="ams-slot-header">Slot 4</div><div class="ams-mat">—</div></div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="cfg-modal" style="display:none; position:fixed; inset:0; z-index:100;
+    background:rgba(0,0,0,.7); backdrop-filter:blur(4px);
+    align-items:center; justify-content:center;">
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:16px;
+      padding:36px; width:min(480px,92vw); box-shadow:0 24px 64px rgba(0,0,0,.5)">
+      <h2 style="font-family:var(--mono); font-size:15px; color:var(--accent); margin-bottom:24px;
+        letter-spacing:.08em; text-transform:uppercase;">⚙ Printer Config</h2>
+      <div style="display:flex; flex-direction:column; gap:16px">
+        <div>
+          <label style="font-family:var(--mono); font-size:11px; color:var(--muted);
+            text-transform:uppercase; letter-spacing:.1em; display:block; margin-bottom:6px">
+            Printer IP / Hostname
+          </label>
+          <input id="cfg-host" type="text" placeholder="192.168.1.100" value=""
+            style="width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px;
+            padding:10px 14px; color:var(--text); font-family:var(--mono); font-size:14px;
+            outline:none; transition:border-color .2s">
+        </div>
+        <div>
+          <label style="font-family:var(--mono); font-size:11px; color:var(--muted);
+            text-transform:uppercase; letter-spacing:.1em; display:block; margin-bottom:6px">
+            Device Serial Number
+          </label>
+          <input id="cfg-serial" type="text" placeholder="CMA7GX123456"
+            style="width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px;
+            padding:10px 14px; color:var(--text); font-family:var(--mono); font-size:14px;
+            outline:none; transition:border-color .2s">
+        </div>
+        <div>
+          <label style="font-family:var(--mono); font-size:11px; color:var(--muted);
+            text-transform:uppercase; letter-spacing:.1em; display:block; margin-bottom:6px">
+            Access Code (LAN Mode Pin)
+          </label>
+          <input id="cfg-code" type="password" placeholder="12345678"
+            style="width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px;
+            padding:10px 14px; color:var(--text); font-family:var(--mono); font-size:14px;
+            outline:none; transition:border-color .2s">
+        </div>
+      </div>
+      <div id="cfg-msg" style="margin-top:12px; font-family:var(--mono); font-size:12px;
+        color:var(--err); min-height:18px"></div>
+      <div style="display:flex; gap:10px; margin-top:20px; justify-content:flex-end">
+        <button onclick="closeCfg()" style="background:transparent; border:1px solid var(--border);
+          border-radius:8px; padding:9px 20px; color:var(--muted); font-family:var(--mono);
+          font-size:12px; cursor:pointer; letter-spacing:.06em">Cancel</button>
+        <button onclick="saveCfg()" style="background:var(--accent); border:none; border-radius:8px;
+          padding:9px 20px; color:#000; font-family:var(--mono); font-size:12px; font-weight:700;
+          cursor:pointer; letter-spacing:.06em">Connect</button>
+      </div>
+    </div>
+  </div>
+
+
+<script>
+  const CIRC = 2 * Math.PI * 45; // SVG arc circumference (r=45)
+
+  function arcPct(val, target, maxT) {
+    maxT = maxT || 300;
+    const ratio = target > 0 ? Math.min(val / target, 1.5) : Math.min(val / maxT, 1);
+    return ratio * CIRC;
+  }
+
+  function tempClass(actual, target) {
+    if (target === 0) return { cls: 'c', arcCls: 'cool' };
+    const ratio = actual / target;
+    if (ratio >= 0.98) return { cls: 'h', arcCls: 'hot' };
+    if (ratio >= 0.7)  return { cls: 'w', arcCls: 'warm' };
+    return { cls: 'c', arcCls: 'cool' };
+  }
+
+  function fmtTime(secs) {
+    if (!secs || secs <= 0) return '—';
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m ${s}s`;
+  }
+
+  function renderAMS(ams) {
+    const grid = document.getElementById('ams-grid');
+    const slots = Object.entries(ams).slice(0, 4);
+    if (slots.length === 0) {
+      grid.innerHTML = Array.from({length:4},(_,i) =>
+        `<div class="ams-slot"><div class="ams-slot-header">槽位 ${i+1}</div><div class="ams-mat">—</div></div>`
+      ).join('');
+      return;
+    }
+    grid.innerHTML = slots.map(([k,v]) => `
+      <div class="ams-slot">
+        <div class="ams-slot-header">${k}</div>
+        <div class="ams-color">
+          <div class="ams-dot" style="background:${v.color || '#888'}"></div>
+          <div class="ams-mat">${v.material || '—'}</div>
+        </div>
+        <div class="ams-remain">${v.remaining != null ? v.remaining + '%' : '—'}</div>
+      </div>`).join('');
+  }
+
+  let _prevNozzleTgt = 0, _prevBedTgt = 0;
+  function render(data) {
+    const online = !!data.online;
+
+    // dot
+    const dot = document.getElementById('dot');
+    const conn = document.getElementById('conn-status');
+    dot.className = 'dot' + (online ? ' online' : '');
+    conn.textContent = online ? '打印机在线' : '离线';
+    conn.style.color = online ? 'var(--accent)' : 'var(--err)';
+
+    // offline banner
+    document.getElementById('offline-banner').className = 'offline-banner' + (online ? '' : ' show');
+
+    // ── Hero progress ──
+    const st = data.gcode_state || 'UNKNOWN';
+    const pct = data.progress || 0;
+    const jn = data.job_name || '';
+    const lc = data.layer_current || 0;
+    const lt = data.layer_total || 0;
+
+    // Badge & state
+    const badgeEl = document.getElementById('hero-badge');
+    const stateText = document.getElementById('hero-state-text');
+    const isPrinting = ['RUNNING','打印中'].includes(st);
+    const isFinish   = ['FINISH','COMPLETED','SUCCESS'].includes(st);
+    const isIdle     = ['待机','UNKNOWN','PREPARE'].includes(st);
+    if (isFinish) {
+      badgeEl.className = 'hero-state-badge finish';
+      stateText.textContent = '已完成';
+    } else if (isPrinting) {
+      badgeEl.className = 'hero-state-badge';
+      stateText.textContent = '打印中';
+    } else {
+      badgeEl.className = 'hero-state-badge idle';
+      stateText.textContent = '待机';
+    }
+
+    // Job name
+    const jnEl = document.getElementById('hero-job-name');
+    jnEl.textContent = jn || '暂无打印任务';
+    jnEl.className = 'hero-job-name' + (jn ? '' : ' empty');
+
+    // Big pct
+    document.getElementById('hero-pct').textContent = Math.round(pct) + '%';
+    document.getElementById('hero-bar-fill').style.width = pct + '%';
+
+    // Meta row
+    document.getElementById('hero-eta').textContent = fmtTime(data.remaining_time) || '—';
+    document.getElementById('hero-layer').textContent = (lc && lt) ? `${lc} / ${lt}` : '—';
+    document.getElementById('hero-speed').textContent = data.speed || '—';
+    document.getElementById('hero-remain').textContent = data.remaining_time > 0 ? fmtTime(data.remaining_time) : '—';
+    document.getElementById('hero-updated').textContent = data.last_update || '—';
+
+    // temps — preserve target temps from pushall when short push omits them
+    const nt = data.nozzle_temp;
+    if (data.nozzle_target !== undefined) _prevNozzleTgt = data.nozzle_target;
+    if (data.bed_target !== undefined) _prevBedTgt = data.bed_target;
+    const ntg = _prevNozzleTgt;
+    const bt = data.bed_temp;
+    const btg = _prevBedTgt;
+
+    document.getElementById('nozzle-val').textContent = nt > 0 ? nt + '°' : '—';
+    document.getElementById('nozzle-tgt').textContent = ntg > 0 ? ntg + '°C →' : '—';
+    const nc = tempClass(nt, ntg);
+    document.getElementById('nozzle-val').className = 'gauge-temp ' + nc.cls;
+    const nozzleArc = document.getElementById('nozzle-arc');
+    nozzleArc.className = 'gauge-fg ' + nc.arcCls;
+    nozzleArc.style.strokeDasharray = arcPct(nt, ntg) + ' ' + CIRC;
+
+    document.getElementById('bed-val').textContent = bt > 0 ? bt + '°' : '—';
+    document.getElementById('bed-tgt').textContent = btg > 0 ? btg + '°C →' : '—';
+    const bc = tempClass(bt, btg);
+    document.getElementById('bed-val').className = 'gauge-temp ' + bc.cls;
+    const bedArc = document.getElementById('bed-arc');
+    bedArc.className = 'gauge-fg ' + bc.arcCls;
+    bedArc.style.strokeDasharray = arcPct(bt, btg, 120) + ' ' + CIRC;
+
+    // speed gauge
+    const spd = data.live_speed || 0;
+    const spdArc = document.getElementById('speed-arc');
+    spdArc.className = 'gauge-fg ' + (spd > 200 ? 'hot' : spd > 100 ? 'warm' : 'cool');
+    spdArc.style.strokeDasharray = Math.min(spd / 300, 1) * CIRC + ' ' + CIRC;
+    document.getElementById('speed-val').textContent = spd > 0 ? spd : '—';
+
+    // stats
+    const st2 = data.gcode_state || 'UNKNOWN';
+    const badges = {
+      '打印中':  'badge-print',
+      'RUNNING':   'badge-print',
+      '待机':      'badge-idle',
+      'PAUSE':     'badge-pause',
+      'PAUSED':    'badge-pause',
+      'FINISH':    'badge-finish',
+      'COMPLETED': 'badge-finish',
+      'ERROR':     'badge-error',
+      'cooling':   'badge-cool',
+    };
+    const cls = badges[st2.toLowerCase()] || 'badge-default';
+    const labels = {
+      'printing': '🖨 Printing',
+      'running': '🖨 Printing',
+      'idle': '⏸ Idle',
+      'pause': '⏸ Paused',
+      'paused': '⏸ Paused',
+      'finish': '✅ Finished',
+      '完成d': '✅ Completed',
+      'error': '❌ Error',
+      'cooling': '❄ Cooling',
+    };
+    document.getElementById('state-badges').innerHTML =
+      `<span class="badge ${cls}">${labels[st2.toLowerCase()] || st}</span>`;
+
+    document.getElementById('stat-remaining').textContent = fmtTime(data.remaining_time);
+    document.getElementById('stat-layer').textContent = `${lc} / ${lt}`;
+    document.getElementById('stat-filament').textContent = data.filament_type || '—';
+
+    // ams
+    renderAMS(data.ams || {});
+  }
+
+  // SSE
+  const src = new EventSource('/events');
+  src.onmessage = e => {
+    try { render(JSON.parse(e.data)); } catch {}
+  };
+  src.onerror = () => {
+    document.getElementById('conn-status').textContent = '重连中…';
+  };
+
+  // Poll fallback
+  setInterval(() => {
+    if (src.readyState === EventSource.CLOSED) {
+      fetch('/api/status').then(r=>r.json()).then(render).catch(()=>{});
+    }
+  }, 5000);
+
+  // Settings modal
+  function openCfg() {
+    document.getElementById('cfg-modal').style.display = 'flex';
+    // fetch current config hint
+    fetch('/api/config').then(r=>r.json()).then(d=>{
+      if(d.host) document.getElementById('cfg-host').value = d.host;
+      if(d.serial) document.getElementById('cfg-serial').value = d.serial;
+    }).catch(()=>{});
+  }
+  function closeCfg() { document.getElementById('cfg-modal').style.display = 'none'; }
+  async function saveCfg() {
+    var host = document.getElementById('cfg-host').value.trim();
+    var serial = document.getElementById('cfg-serial').value.trim();
+    var code = document.getElementById('cfg-code').value;
+    var msg = document.getElementById('cfg-msg');
+    if (!host || !serial) { msg.textContent = 'IP and Serial are required'; return; }
+    msg.textContent = '连接中…';
+    try {
+      var r = await fetch('/api/config', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({host, serial, access_code: code})
+      }).then(r=>r.json());
+      if (r.ok) {
+        msg.style.color = 'var(--accent)';
+        msg.textContent = 'Reconnecting to printer…';
+        setTimeout(closeCfg, 1200);
+      }
+    } catch(e) { msg.textContent = 'Error: ' + e; }
+  }
+
+</script>
+</body>
+</html>

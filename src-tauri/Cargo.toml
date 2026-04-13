@@ -1,0 +1,25 @@
+[package]
+name = "bambu-monitor"
+version = "0.1.0"
+description = "Bambu Lab Printer Monitor with System Tray"
+authors = ["David"]
+edition = "2021"
+
+[lib]
+name = "bambu_monitor_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["process", "io-util", "rt-multi-thread", "macros", "time", "sync"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+log = "0.4"
+env_logger = "0.11"
