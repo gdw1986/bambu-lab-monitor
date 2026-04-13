@@ -708,12 +708,17 @@
         body: JSON.stringify({host, serial, access_code: code})
       });
       if (!r.ok) { msg.textContent = '保存失败，请重试'; return; }
-      const d = await r.json();
-      if (d.ok) {
-        msg.style.color = 'var(--accent)'; msg.textContent = '配置已保存，正在重连…';
-        setTimeout(closeCfg, 1500);
-      } else {
-        msg.textContent = d.error || '保存失败，请重试';
+      try {
+        const d = await r.json();
+        if (d.ok) {
+          msg.style.color = 'var(--accent)'; msg.textContent = '配置已保存，正在重连…';
+          setTimeout(closeCfg, 1500);
+        } else {
+          msg.textContent = d.error || '保存失败，请重试';
+        }
+      } catch(e) {
+        // Server returned non-JSON (e.g. empty body or invalid JSON)
+        msg.textContent = '服务器返回格式错误，请重试';
       }
     } catch(e) { msg.textContent = '错误: ' + e; }
   }

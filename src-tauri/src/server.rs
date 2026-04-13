@@ -596,6 +596,11 @@ fn serve_config_post_sync<W: std::io::Read + std::io::Write>(
     shared: &Arc<SharedState>,
     body: &[u8],
 ) -> std::io::Result<()> {
+    if body.is_empty() {
+        log::warn!("POST /api/config: empty body");
+        let body = r#"{"error":"empty body"}"#;
+        return write_http_ok(stream, body.as_bytes(), "application/json");
+    }
     if let Ok(update) = serde_json::from_slice::<ConfigUpdate>(body) {
         let mut cfg = shared.config.write().unwrap();
         if let Some(h) = update.host { cfg.host = h; }
@@ -609,6 +614,7 @@ fn serve_config_post_sync<W: std::io::Read + std::io::Write>(
         drop(cfg);
         write_http_json_ok(stream, resp_body.as_bytes())
     } else {
+        log::warn!("POST /api/config: failed to parse body = {:?}", String::from_utf8_lossy(body));
         let body = r#"{"error":"invalid JSON"}"#;
         write_http_ok(stream, body.as_bytes(), "application/json")
     }
