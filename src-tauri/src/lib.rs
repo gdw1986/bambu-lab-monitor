@@ -14,6 +14,7 @@ use tauri::{
 use tokio::sync::broadcast;
 
 mod server;
+mod storage;
 use server::{start_http_server, mqtt_loop, SharedState};
 
 // ── Tray icon ────────────────────────────────────────────────────────────────
@@ -183,6 +184,32 @@ fn get_debug_info() -> String {
     )
 }
 
+#[tauri::command]
+async fn save_config(host: String, serial: String, access_code: String) -> Result<bool, String> {
+    log::info!("[save_config] Called with host={} serial={} access_code={}", host, serial, access_code);
+    
+    // Persist the config
+    let persisted = storage::PersistedConfig {
+        host: host.clone(),
+        serial: serial.clone(),
+        access_code: access_code.clone(),
+    };
+    
+    if let Err(e) = storage::save_persisted_config(&persisted) {
+        log::error!("[save_config] Failed to save config: {}", e);
+        return Err(format!("Failed to save: {}", e));
+    }
+    
+    log::info!("[save_config] Config saved to file, calling notify_config_update");
+    
+    // Notify the server to reload config
+    server::notify_config_update();
+    
+    log::info!("[save_config] notify_config_update returned");
+    
+    Ok(true)
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 static PRINT_WAS_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -195,7 +222,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![send_notification, get_http_port, get_debug_info])
+        .invoke_handler(tauri::generate_handler![send_notification, get_http_port, get_debug_info, save_config])
         .setup(|app| {
             eprintln!("[SETUP] app data dir = {:?}", app.path().app_data_dir());
             info!("=== Bambu Monitor setup starting ===");
@@ -209,6 +236,9 @@ pub fn run() {
             // Shared state for HTTP + MQTT
             let (tx, _rx) = broadcast::channel::<server::PrinterState>(64);
             let shared = Arc::new(SharedState::new(tx));
+            
+            // Set global shared state for config updates
+            *server::GLOBAL_SHARED.lock().unwrap() = Some(shared.clone());
 
             let app_handle = app.handle().clone();
 

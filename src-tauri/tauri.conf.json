@@ -20,7 +20,8 @@
         "minHeight": 600,
         "center": true,
         "resizable": true,
-        "visible": true
+        "visible": true,
+        "devtools": true
       }
     ],
     "trayIcon": {
@@ -42,6 +43,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "../dist": "dist"
+    },
     "macOS": {
       "minimumSystemVersion": "10.15"
     }

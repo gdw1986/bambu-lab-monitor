@@ -21,8 +21,14 @@ tauri-plugin-shell = "2"
 
 # HTTP server: pure std::net::TcpListener (no external crate needed)
 
-# MQTT client
-rumqttc = "0.24"
+# MQTT client — use rustls
+rumqttc = { version = "0.24", default-features = false, features = ["use-rustls"] }
+
+# TLS dependencies for custom cert verification
+rustls = "0.22"
+
+
+
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -47,3 +53,16 @@ uuid = { version = "1", features = ["v4"] }
 # Async stream for mqtt_loop
 async-stream = "0.3"
 futures-util = "0.3"
+
+# HTTP server (axum)
+axum = { version = "0.7", features = ["macros", "ws"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "fs"] }
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# File watching & config
+directories = "5"
+thiserror = "1"
+once_cell = "1"
