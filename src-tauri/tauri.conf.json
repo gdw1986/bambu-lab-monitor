@@ -11,6 +11,7 @@
   },
   "app": {
     "withGlobalTauri": true,
+    "enableGTKAppId": false,
     "windows": [
       {
         "title": "Bambu Monitor",
@@ -21,7 +22,8 @@
         "center": true,
         "resizable": true,
         "visible": true,
-        "devtools": true
+        "devtools": true,
+        "transparent": true
       }
     ],
     "trayIcon": {

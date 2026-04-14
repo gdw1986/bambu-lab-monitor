@@ -19,6 +19,70 @@ use server::{start_http_server, mqtt_loop, SharedState};
 
 // ── Tray icon ────────────────────────────────────────────────────────────────
 
+/// 五档进度: 0, 25, 50, 75, 100
+fn progress_level(progress: f64) -> i32 {
+    let p = progress.clamp(0.0, 100.0);
+    if p >= 100.0 { 100 }
+    else if p >= 75.0 { 75 }
+    else if p >= 50.0 { 50 }
+    else if p >= 25.0 { 25 }
+    else { 0 }
+}
+
+/// 绘制数字到像素缓冲区 (5x3 像素字体)
+fn draw_digit(buf: &mut Vec<u8>, x: usize, y: usize, w: usize, digit: u8, color: (u8, u8, u8)) {
+    let patterns: [[u8; 5]; 10] = [
+        [0b111, 0b101, 0b101, 0b101, 0b111], // 0
+        [0b010, 0b110, 0b010, 0b010, 0b111], // 1
+        [0b111, 0b001, 0b111, 0b100, 0b111], // 2
+        [0b111, 0b001, 0b111, 0b001, 0b111], // 3
+        [0b101, 0b101, 0b111, 0b001, 0b001], // 4
+        [0b111, 0b100, 0b111, 0b001, 0b111], // 5
+        [0b111, 0b100, 0b111, 0b101, 0b111], // 6
+        [0b111, 0b001, 0b001, 0b001, 0b001], // 7
+        [0b111, 0b101, 0b111, 0b101, 0b111], // 8
+        [0b111, 0b101, 0b111, 0b001, 0b111], // 9
+    ];
+    
+    let pattern = patterns[digit as usize];
+    for row in 0..5 {
+        for col in 0..3 {
+            if pattern[row] & (1 << (2 - col)) != 0 {
+                let idx = ((y + row) * w + (x + col)) * 4;
+                if idx + 2 < buf.len() {
+                    buf[idx] = color.0;
+                    buf[idx + 1] = color.1;
+                    buf[idx + 2] = color.2;
+                    buf[idx + 3] = 255;
+                }
+            }
+        }
+    }
+}
+
+/// 绘制进度数字 (0-100) 到图标中心
+fn draw_progress_number(buf: &mut Vec<u8>, w: usize, h: usize, progress: i32, color: (u8, u8, u8)) {
+    let prog = progress.clamp(0, 100);
+    let digits = if prog >= 100 {
+        vec![1, 0, 0]
+    } else if prog >= 10 {
+        vec![(prog / 10) as u8, (prog % 10) as u8]
+    } else {
+        vec![prog as u8]
+    };
+    
+    let digit_w = 3;
+    let digit_h = 5;
+    let spacing = 1;
+    let total_w = digits.len() * digit_w + (digits.len() - 1) * spacing;
+    let start_x = (w - total_w) / 2;
+    let start_y = (h - digit_h) / 2;
+    
+    for (i, &digit) in digits.iter().enumerate() {
+        draw_digit(buf, start_x + i * (digit_w + spacing), start_y, w, digit, color);
+    }
+}
+
 fn make_tray_icon(color_rgb: (u8, u8, u8), progress: f64) -> tauri::image::Image<'static> {
     let size: u32 = 32;
     let cx = size as f32 / 2.0;
@@ -28,9 +92,13 @@ fn make_tray_icon(color_rgb: (u8, u8, u8), progress: f64) -> tauri::image::Image
     let (cr, cg, cb) = color_rgb;
     let (bg_r, bg_g, bg_b) = (22u8, 25u8, 32u8);
 
-    let mut rgba = Vec::with_capacity((size * size * 4) as usize);
+    let mut rgba = vec![bg_r, bg_g, bg_b, 0]; // Start with transparent
+    rgba.resize((size * size * 4) as usize, 0);
+    
+    // 五档进度: 0%, 25%, 50%, 75%, 100%
+    let level = progress_level(progress * 100.0);
+    let sweep = (level as f32 / 100.0) * 2.0 * std::f32::consts::PI;
     let start_angle = -std::f32::consts::FRAC_PI_2;
-    let sweep = (progress.clamp(0.0, 1.0) as f32) * 2.0 * std::f32::consts::PI;
     let end_angle = start_angle + sweep;
 
     for y in 0..size {
@@ -38,9 +106,10 @@ fn make_tray_icon(color_rgb: (u8, u8, u8), progress: f64) -> tauri::image::Image
             let dx = x as f32 - cx;
             let dy = y as f32 - cy;
             let dist = (dx * dx + dy * dy).sqrt();
+            let idx = ((y * size + x) * 4) as usize;
 
             if dist > outer_r + 1.5 {
-                rgba.extend_from_slice(&[0, 0, 0, 0]);
+                rgba[idx + 3] = 0; // Transparent
                 continue;
             }
 
@@ -50,6 +119,7 @@ fn make_tray_icon(color_rgb: (u8, u8, u8), progress: f64) -> tauri::image::Image
                 ((outer_r + 1.5 - dist).clamp(0.0, 1.0) * 255.0) as u8
             };
 
+            // 绘制进度环
             let in_ring = sweep > 0.005
                 && dist >= inner_r - 1.5
                 && dist <= outer_r + 1.5
@@ -63,7 +133,7 @@ fn make_tray_icon(color_rgb: (u8, u8, u8), progress: f64) -> tauri::image::Image
                     a >= start_angle - 0.05 && a <= end_angle + 0.05
                 };
 
-            let (r, g, b, a) = if in_ring {
+            if in_ring {
                 let cov = if dist >= inner_r && dist <= outer_r {
                     1.0f32
                 } else if dist < inner_r {
@@ -71,19 +141,27 @@ fn make_tray_icon(color_rgb: (u8, u8, u8), progress: f64) -> tauri::image::Image
                 } else {
                     ((outer_r + 1.5 - dist) / 1.5).clamp(0.0, 1.0)
                 };
-                (
-                    (cr as f32 * cov + bg_r as f32 * (1.0 - cov)) as u8,
-                    (cg as f32 * cov + bg_g as f32 * (1.0 - cov)) as u8,
-                    (cb as f32 * cov + bg_b as f32 * (1.0 - cov)) as u8,
-                    255u8,
-                )
+                rgba[idx] = (cr as f32 * cov + bg_r as f32 * (1.0 - cov)) as u8;
+                rgba[idx + 1] = (cg as f32 * cov + bg_g as f32 * (1.0 - cov)) as u8;
+                rgba[idx + 2] = (cb as f32 * cov + bg_b as f32 * (1.0 - cov)) as u8;
+                rgba[idx + 3] = 255;
+            } else if dist < inner_r - 2.0 {
+                // 内部背景 - 稍暗
+                rgba[idx] = bg_r;
+                rgba[idx + 1] = bg_g;
+                rgba[idx + 2] = bg_b;
+                rgba[idx + 3] = bg_alpha;
             } else {
-                (bg_r, bg_g, bg_b, bg_alpha)
-            };
-
-            rgba.extend_from_slice(&[r, g, b, a]);
+                rgba[idx] = bg_r;
+                rgba[idx + 1] = bg_g;
+                rgba[idx + 2] = bg_b;
+                rgba[idx + 3] = bg_alpha;
+            }
         }
     }
+
+    // 在中心绘制进度数字
+    draw_progress_number(&mut rgba, size as usize, size as usize, level, (255, 255, 255));
 
     tauri::image::Image::new_owned(rgba, size, size)
 }
@@ -99,12 +177,55 @@ fn state_icon(state: &str, progress: f64) -> ((u8, u8, u8), String) {
     }
 }
 
-fn update_tray(app: &AppHandle, state: &str, progress: f64) {
+fn update_tray(app: &AppHandle, shared: &Arc<SharedState>, state: &str, progress: f64) {
     let (rgb, tooltip) = state_icon(state, progress);
     let icon = make_tray_icon(rgb, progress / 100.0);
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_icon(Some(icon));
         let _ = tray.set_tooltip(Some(&tooltip));
+    }
+    
+    // Control floating window visibility based on printing state
+    let is_printing = matches!(
+        state.to_uppercase().as_str(),
+        "RUNNING" | "PRINTING" | "PAUSE" | "PAUSED"
+    );
+    
+    if let Some(window) = app.get_webview_window("floating-progress") {
+        // Get additional data from shared state for floating window
+        let state_guard = shared.state.read().unwrap();
+        let bed_temp = state_guard.bed_temp as i32;
+        let nozzle_temp = state_guard.nozzle_temp as i32;
+        let remaining_time = state_guard.remaining_time;
+        let job_name = state_guard.job_name.clone();
+        drop(state_guard);
+        
+        // Always emit state update to floating window when it's visible or should be visible
+        eprintln!("[Tray] Emitting state to floating window: state={}, progress={}", state, progress);
+        let result = window.emit("printer-state", serde_json::json!({
+            "state": state,
+            "progress": progress,
+            "bed_temp": bed_temp,
+            "nozzle_temp": nozzle_temp,
+            "remaining_time": remaining_time,
+            "job_name": job_name
+        }));
+        if let Err(e) = result {
+            eprintln!("[Tray] Failed to emit to floating window: {}", e);
+        }
+
+        if is_printing && progress >= 0.0 && progress < 100.0 {
+            let _ = window.show();
+        } else if state.to_uppercase() == "FINISH" || state.to_uppercase() == "COMPLETED" {
+            // Keep visible for a moment on completion, then hide
+            let app_clone = app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                if let Some(w) = app_clone.get_webview_window("floating-progress") {
+                    let _ = w.hide();
+                }
+            });
+        }
     }
 }
 
@@ -155,18 +276,8 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// ── OS notification ───────────────────────────────────────────────────────────
-
-#[tauri::command]
-async fn send_notification(app: AppHandle, title: String, body: String) -> Result<(), String> {
-    use tauri_plugin_notification::NotificationExt;
-    app.notification()
-        .builder()
-        .title(&title)
-        .body(&body)
-        .show()
-        .map_err(|e| e.to_string())
-}
+// ── OS notification removed ───────────────────────────────────────────────────
+// Notifications are now shown only in the tray icon tooltip, not as OS popups
 
 #[tauri::command]
 fn get_http_port() -> u16 {
@@ -220,9 +331,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![send_notification, get_http_port, get_debug_info, save_config])
+        .invoke_handler(tauri::generate_handler![get_http_port, get_debug_info, save_config])
         .setup(|app| {
             eprintln!("[SETUP] app data dir = {:?}", app.path().app_data_dir());
             info!("=== Bambu Monitor setup starting ===");
@@ -257,13 +367,76 @@ pub fn run() {
 
             // MQTT client (rumqttc, async task)
             let mqtt_shared = shared.clone();
+            eprintln!("[SETUP] Spawning mqtt_loop task...");
             tauri::async_runtime::spawn(async move {
                 mqtt_loop(mqtt_shared).await;
             });
+            eprintln!("[SETUP] mqtt_loop task spawned");
 
             info!("=== Bambu Monitor setup complete ===");
 
-            // Tray icon updater — polls /api/status every 6s
+            // Create floating progress window (always on top, small, shows progress ring)
+            let monitor = app.primary_monitor().ok().flatten();
+            let (win_x, win_y) = if let Some(m) = monitor {
+                let size = m.size();
+                // Position at bottom-right with 20px margin
+                (size.width as f64 - 140.0, size.height as f64 - 140.0)
+            } else {
+                (1600.0, 900.0)  // Fallback
+            };
+            
+            eprintln!("[SETUP] Creating floating window at ({}, {})", win_x, win_y);
+            let _float_window = tauri::WebviewWindowBuilder::new(
+                app,
+                "floating-progress",
+                tauri::WebviewUrl::App("/floating.html".into())
+            )
+            .title("")
+            .inner_size(140.0, 140.0)
+            .position(win_x, win_y)
+            .always_on_top(true)
+            .decorations(false)       // No window decorations
+            .transparent(true)        // Allow transparent background
+            .skip_taskbar(true)       // Don't show in taskbar
+            .resizable(false)
+            .visible(false)           // Hidden by default, shown when printing
+            .shadow(false)            // No window shadow (removes the square border)
+            .build()
+            .ok();
+            
+            if _float_window.is_some() {
+                eprintln!("[SETUP] Floating window created successfully");
+            } else {
+                eprintln!("[SETUP] Failed to create floating window");
+            }
+
+            // Tray icon updater — reads from shared state directly (updated by MQTT)
+            let tray_shared = shared.clone();
+            let app2 = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let mut last_state = String::new();
+                let mut last_progress: i32 = -1;
+
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+                    // Read directly from shared state (updated by MQTT in real-time)
+                    let state = tray_shared.state.read().unwrap();
+                    let state_str = state.gcode_state.clone();
+                    let progress = state.progress;
+                    drop(state);
+
+                    // Update tray if state or progress changed significantly
+                    let progress_int = progress as i32;
+                    if state_str != last_state || (progress_int - last_progress).abs() >= 1 {
+                        last_state = state_str.clone();
+                        last_progress = progress_int;
+                        update_tray(&app2, &tray_shared, &state_str, progress);
+                    }
+                }
+            });
+
+            // HTTP poller for frontend events (notifications removed - now shown in tray only)
             let client = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(5))
                 .build()
@@ -271,16 +444,34 @@ pub fn run() {
 
             let app2 = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                let mut last_state = String::new();
+                let mut consecutive_errors: u32 = 0;
 
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(6)).await;
 
                     let port = server::http_port();
-                    if port == 0 { continue; }
+                    if port == 0 { 
+                        if consecutive_errors % 5 == 4 {
+                            warn!("HTTP server port is 0, backend may not be ready (consecutive: {})", consecutive_errors + 1);
+                        }
+                        consecutive_errors += 1;
+                        continue; 
+                    }
+                    
                     let url = format!("http://localhost:{}/api/status", port);
                     match client.get(&url).send().await {
                         Ok(resp) => {
+                            if consecutive_errors > 0 {
+                                info!("Backend connection restored after {} failed attempts", consecutive_errors);
+                                consecutive_errors = 0;
+                            }
+
+                            if !resp.status().is_success() {
+                                warn!("Status API returned status {}", resp.status());
+                                consecutive_errors += 1;
+                                continue;
+                            }
+
                             if let Ok(json) = resp.json::<serde_json::Value>().await {
                                 let state = json
                                     .get("gcode_state")
@@ -297,11 +488,7 @@ pub fn run() {
                                     .unwrap_or("—")
                                     .to_string();
 
-                                if state != last_state || (progress as i32) % 30 == 0 {
-                                    last_state = state.clone();
-                                    update_tray(&app2, &state, progress);
-                                }
-
+                                // Emit event for frontend (tray shows progress visually)
                                 let _ = app2.emit("printer-state", serde_json::json!({
                                     "state": state,
                                     "job": job,
@@ -315,14 +502,33 @@ pub fn run() {
                                 );
                                 if was_running && is_finish {
                                     PRINT_WAS_RUNNING.store(false, Ordering::SeqCst);
-                                    let _ = app2.emit("print-finished", serde_json::json!({ "job": job }));
+                                    // Send desktop notification for print completion
+                                    use tauri::Emitter;
+                                    let _ = app2.emit("print-complete", serde_json::json!({
+                                        "title": "打印完成",
+                                        "body": format!("任务 '{}' 已完成", job)
+                                    }));
                                 }
-                                if state.to_uppercase() == "RUNNING" {
+                                if state.to_uppercase() == "RUNNING" || state.to_uppercase() == "PRINTING" {
                                     PRINT_WAS_RUNNING.store(true, Ordering::SeqCst);
                                 }
+                            } else {
+                                warn!("Failed to parse JSON response from status API");
+                                consecutive_errors += 1;
                             }
                         }
-                        Err(_) => {}
+                        Err(e) => {
+                            consecutive_errors += 1;
+                            // Only log error periodically to avoid log spam
+                            if consecutive_errors % 10 == 0 || consecutive_errors <= 2 {
+                                warn!("Failed to fetch printer state (attempt {}): {}", consecutive_errors, e);
+                            }
+                            
+                            // If too many consecutive errors, try to trigger a health check
+                            if consecutive_errors >= 20 && server::mqtt_connected() {
+                                warn!("Too many errors, checking MQTT connection status");
+                            }
+                        }
                     }
                 }
             });

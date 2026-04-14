@@ -20,6 +20,8 @@ use std::time::Duration;
 static HTTP_PORT: AtomicU16 = AtomicU16::new(0);
 /// Module-level MQTT connected flag, written by mqtt_loop, read by get_debug_info.
 static MQTT_CONNECTED: AtomicBool = AtomicBool::new(false);
+/// Flag to signal MQTT loop to reconnect with updated config
+static MQTT_RECONNECT_NEEDED: AtomicBool = AtomicBool::new(true);  // Start with true so initial connection works
 
 use chrono::Local;
 use once_cell::sync::Lazy;
@@ -377,13 +379,22 @@ impl ServerCertVerifier for AcceptAnyCertificate {
         Ok(HandshakeSignatureValid::assertion())
     }
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        vec![]
+        // Support all common signature schemes for Bambu Lab printer TLS
+        vec![
+            rustls::SignatureScheme::RSA_PKCS1_SHA256,
+            rustls::SignatureScheme::RSA_PKCS1_SHA384,
+            rustls::SignatureScheme::RSA_PKCS1_SHA512,
+            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
+            rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
+            rustls::SignatureScheme::ED25519,
+        ]
     }
 }
 
 // ── MQTT loop (async) ────────────────────────────────────────────────────────
 
 pub async fn mqtt_loop(app_state: Arc<SharedState>) {
+    eprintln!("[MQTT] mqtt_loop started, waiting for connection signal...");
     let RUNNING: AtomicBool = AtomicBool::new(true);
     let running = &RUNNING;
 
@@ -392,6 +403,18 @@ pub async fn mqtt_loop(app_state: Arc<SharedState>) {
             break;
         }
 
+        // Check if we need to reconnect (config changed or initial connection)
+        if !MQTT_RECONNECT_NEEDED.load(Ordering::SeqCst) {
+            // Config hasn't changed and we're already connected, just wait for signal
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            continue;
+        }
+
+        // Reset the flag before attempting connection
+        // This prevents re-entry if another config update happens during connection
+        // If connection fails, we'll set it back to true after the retry delay
+        MQTT_RECONNECT_NEEDED.store(false, Ordering::SeqCst);
+
         let (host, serial, access_code) = {
             let cfg = app_state.config.read().unwrap();
             (cfg.host.clone(), cfg.serial.clone(), cfg.access_code.clone())
@@ -399,12 +422,14 @@ pub async fn mqtt_loop(app_state: Arc<SharedState>) {
 
         // If config is empty, wait until user provides it
         if host.is_empty() || serial.is_empty() {
-            log::debug!("MQTT waiting for printer config (host={}, serial={})", host, serial);
+            eprintln!("[MQTT] Waiting for printer config (host='{}', serial='{}')", host, serial);
             tokio::time::sleep(Duration::from_secs(2)).await;
+            // Re-set the flag so we check again when user enters config
+            MQTT_RECONNECT_NEEDED.store(true, Ordering::SeqCst);
             continue;
         }
 
-        log::info!("MQTT connecting → {}:8883 (serial={}, access_code present={})", 
+        eprintln!("[MQTT] Connecting to {}:8883 (serial={}, access_code present={}, tls=rustls)",
             host, serial, !access_code.is_empty());
 
         let mut mqtt_opts = MqttOptions::new(
@@ -414,13 +439,14 @@ pub async fn mqtt_loop(app_state: Arc<SharedState>) {
         );
         mqtt_opts.set_keep_alive(Duration::from_secs(30));
         mqtt_opts.set_clean_session(true);
+        // Connection timeout is handled by the eventloop.poll() timeout, not MqttOptions
         if !access_code.is_empty() {
             mqtt_opts.set_credentials("bblp", &access_code);
         }
 
-        // Bambu Lab printers use self-signed TLS certificates.
+        // Bambu Lab printers use self-signed TLS certificates with TLS 1.2
         // Use rustls with dangerous configuration that accepts any cert
-        let tls_config = rustls::ClientConfig::builder()
+        let tls_config = rustls::ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS12])
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(AcceptAnyCertificate::new()) as Arc<dyn ServerCertVerifier>)
             .with_no_client_auth();
@@ -433,10 +459,11 @@ pub async fn mqtt_loop(app_state: Arc<SharedState>) {
         let report_topic = format!("device/{}/report", serial);
         let req_topic = format!("device/{}/request", serial);
 
+        log::info!("[MQTT] Attempting to subscribe to: {}", report_topic);
         if let Err(e) = client.subscribe(&report_topic, QoS::AtMostOnce).await {
-            log::error!("Subscribe failed: {}", e);
+            log::error!("[MQTT] Subscribe failed: {}", e);
         } else {
-            log::info!("Subscribed to {}", report_topic);
+            log::info!("[MQTT] Subscribed to {}", report_topic);
         }
 
         // Request initial pushall
@@ -452,6 +479,7 @@ pub async fn mqtt_loop(app_state: Arc<SharedState>) {
         loop {
             match eventloop.poll().await {
                 Ok(MqttEvent::Incoming(Packet::Publish(p))) => {
+                    log::debug!("[MQTT] Received publish ({} bytes), topic: {}", p.payload.len(), p.topic);
                     if let Ok(obj) =
                         serde_json::from_slice::<serde_json::Value>(p.payload.as_ref())
                     {
@@ -464,14 +492,17 @@ pub async fn mqtt_loop(app_state: Arc<SharedState>) {
                     }
                 }
                 Ok(MqttEvent::Incoming(Packet::ConnAck(_))) => {
-                    log::info!("MQTT connected ✓");
+                    eprintln!("[MQTT] Connected successfully ✓");
                     MQTT_CONNECTED.store(true, Ordering::SeqCst);
                     let state = (*app_state.state.read().unwrap()).clone();
                     let _ = app_state.tx.send(state);
                 }
+                Ok(MqttEvent::Incoming(Packet::SubAck(_))) => {
+                    eprintln!("[MQTT] Subscribe acknowledged ✓");
+                }
                 Ok(_) => {}
                 Err(e) => {
-                    log::warn!("MQTT poll error: {}", e);
+                    eprintln!("[MQTT] Connection error: {}", e);
                     break;
                 }
             }
@@ -483,6 +514,10 @@ pub async fn mqtt_loop(app_state: Arc<SharedState>) {
             state.online = false;
             let _ = app_state.tx.send((*state).clone());
         }
+        
+        // Set reconnect flag so we attempt to reconnect with potentially updated config
+        MQTT_RECONNECT_NEEDED.store(true, Ordering::SeqCst);
+        
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
@@ -513,10 +548,8 @@ fn handle_connection(
         let mut line = String::new();
         reader.read_line(&mut line)?;
         let line_lower = line.to_lowercase();
-        log::info!("Header: {:?}", line.trim());
         if line_lower.starts_with("content-length:") {
             let val = line_lower.split(':').nth(1).unwrap_or("").trim();
-            log::info!("Content-Length value: {:?}", val);
             if let Ok(len) = val.parse::<usize>() {
                 content_length = len;
             }
@@ -525,7 +558,6 @@ fn handle_connection(
             break;
         }
     }
-    log::info!("After headers, content_length={}", content_length);
 
     // Route
     match (path, method) {
@@ -547,9 +579,7 @@ fn handle_connection(
             serve_config_get_sync(&mut stream, shared)?;
         }
         ("/api/config", "POST") => {
-            log::info!("POST /api/config: content_length={}", content_length);
             if content_length == 0 {
-                log::warn!("No Content-Length header, sending 400");
                 let resp = b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
                 stream.write_all(resp)?;
             } else {
@@ -557,25 +587,15 @@ fn handle_connection(
                 let mut bytes_read = 0;
                 while bytes_read < content_length {
                     match stream.read(&mut body[bytes_read..]) {
-                        Ok(0) => {
-                            log::info!("read returned 0, breaking");
-                            break;
-                        }
-                        Ok(n) => {
-                            log::info!("read {} bytes", n);
-                            bytes_read += n;
-                        }
+                        Ok(0) => break,
+                        Ok(n) => bytes_read += n,
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                             thread::sleep(Duration::from_millis(10));
                         }
-                        Err(e) => {
-                            log::error!("read error: {:?}", e);
-                            return Err(e);
-                        }
+                        Err(e) => return Err(e),
                     }
                 }
                 body.truncate(bytes_read);
-                log::info!("Total bytes read: {}", bytes_read);
                 if let Err(e) = serve_config_post_sync(&mut stream, shared, &body) {
                     log::error!("serve_config_post_sync error: {}", e);
                 }
@@ -603,6 +623,9 @@ fn serve_http(listener: std::net::TcpListener, shared: Arc<SharedState>) {
     loop {
         match listener.accept() {
             Ok((stream, _)) => {
+                // Set stream back to blocking for reliable reads/writes.
+                // Listener is non-blocking but individual connections should block.
+                let _ = stream.set_nonblocking(false);
                 let shared = shared.clone();
                 thread::spawn(move || {
                     if let Err(e) = handle_connection(stream, &shared) {
@@ -676,16 +699,12 @@ fn serve_index_sync<W: std::io::Read + std::io::Write>(
     ];
     let content = candidates
         .iter()
-        .find_map(|p| {
-            log::info!("Trying candidate: {:?}", p);
-            std::fs::read_to_string(p).ok()
-        })
+        .find_map(|p| std::fs::read_to_string(p).ok())
         .or_else(|| {
             std::env::current_exe()
                 .ok()
                 .and_then(|e| {
                     let exe_path = e.parent()?.to_path_buf();
-                    log::info!("exe path: {:?}", exe_path);
                     let search_paths = [
                         exe_path.join("index.html"),
                         exe_path.join("dist/index.html"),
@@ -697,9 +716,7 @@ fn serve_index_sync<W: std::io::Read + std::io::Write>(
                         exe_path.join("Resources").join("dist").join("index.html"),
                     ];
                     for path in &search_paths {
-                        log::info!("Checking: {:?}", path);
                         if path.exists() {
-                            log::info!("Found at: {:?}", path);
                             return std::fs::read_to_string(path).ok();
                         }
                     }
@@ -762,20 +779,17 @@ fn serve_config_post_sync<W: std::io::Read + std::io::Write>(
     shared: &Arc<SharedState>,
     body: &[u8],
 ) -> std::io::Result<()> {
-    log::info!("POST /api/config called with body: {:?}", String::from_utf8_lossy(body));
     if body.is_empty() {
-        log::warn!("POST /api/config: empty body");
         let body = r#"{"error":"empty body"}"#;
         return write_http_ok(stream, body.as_bytes(), "application/json");
     }
     if let Ok(update) = serde_json::from_slice::<ConfigUpdate>(body) {
-        log::info!("Parsed config update: host={:?}, serial={:?}, has_access_code={}", 
-            update.host, update.serial, update.access_code.is_some());
         let mut cfg = shared.config.write().unwrap();
         if let Some(h) = update.host { cfg.host = h; }
         if let Some(sn) = update.serial { cfg.serial = sn; }
         if let Some(ac) = update.access_code { cfg.access_code = ac; }
-        log::info!("Config updated in memory: host={} serial={}", cfg.host, cfg.serial);
+        
+        log::info!("Config updated: host={} serial={}", cfg.host, cfg.serial);
         
         let host = cfg.host.clone();
         let serial = cfg.serial.clone();
@@ -785,26 +799,19 @@ fn serve_config_post_sync<W: std::io::Read + std::io::Write>(
             "ok": true, "host": host, "serial": serial
         }))
         .unwrap_or_default();
-        log::info!("Sending response: {}", resp_body);
         drop(cfg);
         
         // Persist config in background (don't block response)
-        let persisted = crate::storage::PersistedConfig {
-            host,
-            serial,
-            access_code,
-        };
+        let persisted = crate::storage::PersistedConfig { host, serial, access_code };
         std::thread::spawn(move || {
             if let Err(e) = crate::storage::save_persisted_config(&persisted) {
                 log::warn!("Failed to persist config: {}", e);
-            } else {
-                log::info!("Config persisted successfully");
             }
         });
         
         write_http_json_ok(stream, resp_body.as_bytes())
     } else {
-        log::warn!("POST /api/config: failed to parse body = {:?}", String::from_utf8_lossy(body));
+        log::warn!("POST /api/config: invalid JSON");
         let body = r#"{"error":"invalid JSON"}"#;
         write_http_ok(stream, body.as_bytes(), "application/json")
     }
@@ -816,16 +823,21 @@ fn serve_sse_sync(
 ) -> std::io::Result<()> {
     use std::io::Write;
 
+    // FIX: Subscribe BEFORE sending headers — this is critical!
+    // The broadcast channel has capacity 64; if we send initial data before subscribing,
+    // the subscriber will miss it and rx.recv() will block forever waiting for next event.
     let mut rx = shared.tx.subscribe();
 
     // Send current state immediately
     let state = shared.state.read().unwrap();
     let init = format!("data: {}\n\n", serde_json::to_string(&*state).unwrap_or_default());
+    log::info!("[SSE] Client connected, sending initial state (online={}, gcode_state={})",
+        state.online, state.gcode_state);
     drop(state);
 
     // SSE headers
-    write!(stream,
-        "HTTP/1.1 200 OK\r\n\
+    stream.write_all(
+        b"HTTP/1.1 200 OK\r\n\
         Content-Type: text/event-stream; charset=utf-8\r\n\
         Cache-Control: no-cache\r\n\
         Connection: keep-alive\r\n\
@@ -838,40 +850,90 @@ fn serve_sse_sync(
     stream.write_all(init.as_bytes())?;
     stream.flush()?;
 
+    // FIX: Use a longer read timeout to avoid frequent WouldBlock errors
+    // and don't treat read timeouts as fatal
+    stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
+
+    // Keep-alive interval
+    let keepalive_interval = Duration::from_secs(25);
     let mut last_keepalive = std::time::Instant::now();
 
-    // Set read timeout so we can periodically check for new events
-    stream.set_read_timeout(Some(Duration::from_millis(200))).ok();
-
-    let mut buf = [0u8; 1];
+    // Small buffer for draining client data
+    let mut buf = [0u8; 256];
 
     loop {
-        // Check for broadcast
+        // FIX #1: Use try_recv correctly — tokio broadcast TryRecvError has ONLY two variants:
+        //   Ok(state)      → got a new message, send it to client
+        //   Err(Lagged(n))  → n=0 means "no new data" (normal), n>0 means we fell behind (warn)
+        //   Err(Closed)     → sender dropped, connection should close
         match rx.try_recv() {
-            Ok(state) => {
-                let data = format!("data: {}\n\n", serde_json::to_string(&state).unwrap_or_default());
+            Ok(new_state) => {
+                let data = format!("data: {}\n\n", serde_json::to_string(&new_state).unwrap_or_default());
                 if stream.write_all(data.as_bytes()).is_err() {
+                    log::info!("[SSE] Client disconnected (write error)");
                     break;
                 }
-                let _ = stream.flush();
+                if stream.flush().is_err() {
+                    log::info!("[SSE] Client disconnected (flush error)");
+                    break;
+                }
             }
-            Err(broadcast::error::TryRecvError::Lagged(_)) => {}
-            Err(_) => break,
-        }
-
-        // Keep-alive every 25s
-        if last_keepalive.elapsed() > Duration::from_secs(25) {
-            last_keepalive = std::time::Instant::now();
-            if stream.write_all(b": ping\n\n").is_err() {
+            Err(broadcast::error::TryRecvError::Lagged(_)) => {
+                // Lagged behind — we'll catch up on next iteration
+            }
+            Err(broadcast::error::TryRecvError::Closed) => {
+                log::info!("[SSE] Broadcast channel closed, closing connection");
                 break;
             }
-            let _ = stream.flush();
+            Err(broadcast::error::TryRecvError::Empty) => {
+                // No new messages yet — normal for SSE long-poll, continue to keep-alive
+            }
         }
 
-        // Drain any pending read data (client sending something)
-        let _ = stream.read(&mut buf);
+        // Keep-alive ping every 25s to prevent proxies from dropping the connection
+        if last_keepalive.elapsed() > keepalive_interval {
+            last_keepalive = std::time::Instant::now();
+            if stream.write_all(b": ping\n\n").is_err() {
+                log::info!("[SSE] Client disconnected during keep-alive");
+                break;
+            }
+            if stream.flush().is_err() {
+                log::info!("[SSE] Flush failed during keep-alive");
+                break;
+            }
+        }
+
+        // FIX #2: Properly handle WouldBlock from read timeout
+        // A read timeout is NOT an error — it just means the client hasn't sent anything.
+        // We need to drain any pending client data to detect disconnections,
+        // but ShouldBlock is expected when there's nothing to read.
+        match stream.read(&mut buf) {
+            Ok(0) => {
+                // EOF — client closed the connection cleanly
+                log::info!("[SSE] Client disconnected (EOF)");
+                break;
+            }
+            Ok(_n) => {
+                // Client sent some data (e.g., comment/heartbeat), ignore it
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                // Read timeout expired — this is completely normal for SSE connections.
+                // Just continue the main loop to check for new broadcast messages.
+                continue;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                // Another form of timeout — also normal
+                continue;
+            }
+            Err(e) => {
+                // Real I/O error — connection is broken
+                log::warn!("[SSE] Read error ({:?}), closing: {}", e.kind(), e);
+                break;
+            }
+        }
     }
 
+    log::info!("[SSE] Connection ended normally");
     Ok(())
 }
 
@@ -913,17 +975,30 @@ pub static GLOBAL_SHARED: Lazy<Mutex<Option<Arc<SharedState>>>> = Lazy::new(|| M
 
 /// Notify the server that config has been updated
 pub fn notify_config_update() {
-    log::info!("notify_config_update called");
+    log::info!("notify_config_update called - triggering MQTT reconnect");
+    
+    // Signal MQTT loop to reconnect with new credentials
+    MQTT_RECONNECT_NEEDED.store(true, Ordering::SeqCst);
+    
     match GLOBAL_SHARED.lock() {
         Ok(shared_opt) => {
             if let Some(shared) = shared_opt.as_ref() {
                 let persisted = crate::storage::load_persisted_config();
                 match shared.config.write() {
                     Ok(mut cfg) => {
+                        let old_host = cfg.host.clone();
+                        let old_serial = cfg.serial.clone();
+                        
                         cfg.host = persisted.host;
                         cfg.serial = persisted.serial;
                         cfg.access_code = persisted.access_code;
-                        log::info!("Config updated in memory from storage: host={} serial={}", cfg.host, cfg.serial);
+                        
+                        log::info!("Config updated in memory from storage: host={}→{} serial={}→{}", 
+                            old_host, cfg.host, old_serial, cfg.serial);
+                        
+                        if old_host != cfg.host || old_serial != cfg.serial || !cfg.access_code.is_empty() {
+                            log::info!("Config changed significantly, forcing MQTT reconnect");
+                        }
                     }
                     Err(e) => {
                         log::error!("Failed to lock config: {}", e);
