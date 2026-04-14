@@ -395,7 +395,6 @@ pub fn run() {
             .inner_size(140.0, 140.0)
             .position(win_x, win_y)
             .decorations(false)       // No title bar (frameless)
-            .transparent(true)       // Enable transparency
             .always_on_top(true)
             .resizable(false)
             .skip_taskbar(true)      // Hide from dock/taskbar

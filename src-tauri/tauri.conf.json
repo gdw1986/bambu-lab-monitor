@@ -22,7 +22,21 @@
         "center": true,
         "resizable": true,
         "visible": true,
-        "devtools": true
+        "devtools": true,
+        "transparent": false
+      },
+      {
+        "label": "floating-progress",
+        "title": "",
+        "width": 140,
+        "height": 140,
+        "resizable": false,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "skipTaskbar": true,
+        "alwaysOnTop": true,
+        "url": "floating.html"
       }
     ],
     "trayIcon": {
