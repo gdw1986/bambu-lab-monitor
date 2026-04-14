@@ -58,7 +58,9 @@ jobs:
         run: npm ci
 
       - name: Copy floating.html to dist
-        run: cp floating.html dist/
+        run: |
+          mkdir -p dist
+          cp floating.html dist/
 
       - name: Build Tauri app
         env:
