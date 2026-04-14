@@ -22,8 +22,7 @@
         "center": true,
         "resizable": true,
         "visible": true,
-        "devtools": true,
-        "transparent": true
+        "devtools": true
       }
     ],
     "trayIcon": {
