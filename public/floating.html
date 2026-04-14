@@ -167,6 +167,30 @@
     let currentInfoIndex = 0;
     let infoRotationTimer = null;
 
+    // Tauri v2 drag: call startDragging on mousedown on draggable area
+    // Works on macOS without -webkit-app-region
+    container.addEventListener('mousedown', async (e) => {
+      // Don't drag if clicking close button
+      if (e.target === closeBtn || closeBtn.contains(e.target)) return;
+      try {
+        const win = getCurrentWindow();
+        await win.startDragging();
+      } catch (err) {
+        console.error('[Floating] startDragging failed:', err);
+      }
+    });
+
+    // Touch drag support
+    container.addEventListener('touchstart', async (e) => {
+      if (e.target === closeBtn || closeBtn.contains(e.target)) return;
+      try {
+        const win = getCurrentWindow();
+        await win.startDragging();
+      } catch (err) {
+        console.error('[Floating] startDragging failed:', err);
+      }
+    }, { passive: true });
+
     function updateProgress(progress, state) {
       console.log('[Floating] updateProgress called:', progress, state);
       const pct = Math.min(100, Math.max(0, progress));
@@ -251,7 +275,7 @@
       currentInfoIndex = 0;
       startInfoRotation();
     }).then(() => {
-      console.log('[Floating] Event listener registered');
+      console.log('[Floating] Event listener');
     }).catch(err => {
       console.error('[Floating] Failed to register listener:', err);
     });
