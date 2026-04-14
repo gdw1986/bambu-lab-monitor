@@ -400,7 +400,6 @@ pub fn run() {
             .skip_taskbar(true)       // Don't show in taskbar
             .resizable(false)
             .visible(false)           // Hidden by default, shown when printing
-            .shadow(false)            // No window shadow (removes the square border)
             .build()
             .ok();
             
