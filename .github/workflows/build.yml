@@ -57,6 +57,9 @@ jobs:
       - name: Install frontend deps
         run: npm ci
 
+      - name: Copy floating.html to dist
+        run: cp floating.html dist/
+
       - name: Build Tauri app
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
