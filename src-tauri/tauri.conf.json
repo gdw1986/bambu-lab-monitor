@@ -36,7 +36,8 @@
         "transparent": true,
         "skipTaskbar": true,
         "alwaysOnTop": true,
-        "url": "floating.html"
+        "url": "floating.html",
+        "shadow": false
       }
     ],
     "trayIcon": {
