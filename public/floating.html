@@ -16,6 +16,25 @@
       height: 140px;
       background: transparent !important;
       overflow: hidden;
+      /* macOS transparency fixes */
+      color-scheme: dark;
+      -webkit-color-scheme: dark;
+    }
+    
+    /* Force webview background transparent on macOS */
+    html {
+      background-color: transparent !important;
+    }
+    
+    body {
+      background-color: transparent !important;
+      /* Prevent white flash on load */
+      animation: fadeIn 0.1s ease;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
     }
     
     body {
