@@ -395,9 +395,6 @@ pub fn run() {
             .inner_size(140.0, 140.0)
             .position(win_x, win_y)
             .always_on_top(true)
-            .decorations(false)       // No window decorations
-            .transparent(true)        // Allow transparent background
-            .skip_taskbar(true)       // Don't show in taskbar
             .resizable(false)
             .visible(false)           // Hidden by default, shown when printing
             .build()
