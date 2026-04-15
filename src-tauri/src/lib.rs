@@ -424,7 +424,7 @@ pub fn run() {
             .always_on_top(true)
             .resizable(false)
             .skip_taskbar(true)      // Hide from dock/taskbar
-            .visible(false)          // Hidden by default, shown when printing
+            .visible(true)           // DEBUG: show immediately on startup
             .build()
             .ok();
             
