@@ -16,7 +16,7 @@ tauri-build = { version = "2", features = [] }
 # Tauri core
 tauri = { version = "2", features = ["tray-icon"] }
 libc = "0.2"
-objc2 = { version = "0.6", features = ["macros"] }
+objc2 = { version = "0.6", features = ["objc2-proc-macros"] }
 objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSColor"] }
 
 tauri-plugin-opener = "2"
