@@ -415,8 +415,13 @@ pub fn run() {
 
             // Window is already defined in tauri.conf.json — just grab it and configure
             if let Some(float_win) = app.get_webview_window("floating-progress") {
-                eprintln!("[SETUP] Found floating window, setting position + NSPanel config...");
-                let _ = float_win.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(win_x, win_y)));
+                // macOS: origin at bottom-left. y=0 = bottom of screen (above dock).
+                // x: right side minus window width. y=0: bottom of screen.
+                let float_x = win_x - 140.0;
+                let float_y = 0.0;
+                eprintln!("[SETUP] Monitor size: {}x{}, float window pos: ({}, {})",
+                    win_x, win_y, float_x, float_y);
+                let _ = float_win.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(float_x, float_y)));
                 setup_nspanel(&float_win);
                 let _ = float_win.show(); // DEBUG: show immediately (remove after debugging)
                 eprintln!("[SETUP] Floating window configured and shown");
