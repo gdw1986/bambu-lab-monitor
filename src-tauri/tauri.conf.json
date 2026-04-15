@@ -46,7 +46,10 @@
       "menuOnLeftClick": false
     },
     "security": {
-      "csp": null
+      "csp": null,
+      "dangerousPrivateApi": {
+        "enabled": true
+      }
     }
   },
   "bundle": {
