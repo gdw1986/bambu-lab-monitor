@@ -238,24 +238,50 @@ fn update_tray(app: &AppHandle, shared: &Arc<SharedState>, state: &str, progress
 // white-background issues entirely.
 #[cfg(target_os = "macos")]
 fn setup_nspanel(window: &WebviewWindow) {
-    // ns_window() returns *mut c_void. Cast to *mut NSWindow, then safely dereference.
-    let raw = window.ns_window().expect("[NSWindow] ns_window() failed");
-    let ns_win: &mut objc2_app_kit::NSWindow = unsafe { &mut *(raw as *mut objc2_app_kit::NSWindow) };
+    use std::ffi::CString;
 
-    // ── 1. Floating level ─────────────────────────────────────────────────
-    // NSFloatingWindowLevel = 3: above normal windows, below sheets/alerts.
-    ns_win.setLevel(3);
+    // ns_window() returns *mut c_void — a raw pointer to the underlying NSWindow.
+    let raw = match window.ns_window() {
+        Ok(ptr) if !ptr.is_null() => ptr,
+        Ok(_)  => { eprintln!("[NSWindow] ns_window() returned null"); return; }
+        Err(e) => { eprintln!("[NSWindow] ns_window() failed: {:?}", e); return; }
+    };
 
-    // ── 2. Make transparent ───────────────────────────────────────────────
-    ns_win.setOpaque(false);
-    let clear = objc2_app_kit::NSColor::clearColor();
-    ns_win.setBackgroundColor(Some(&clear));
+    // ── msg_send equivalent using libc for cross-compiler compatibility ──
+    // ObjC selector: setLevel:
+    let sel_setLevel = unsafe { libc::sel_registerName(b"setLevel: ".as_ptr() as *const _) };
+    // Selector: setOpaque:
+    let sel_setOpaque = unsafe { libc::sel_registerName(b"setOpaque: ".as_ptr() as *const _) };
+    // Selector: setHasShadow:
+    let sel_setHasShadow = unsafe { libc::sel_registerName(b"setHasShadow: ".as_ptr() as *const _) };
+    // Selector: setBackgroundColor:
+    let sel_setBgColor = unsafe { libc::sel_registerName(b"setBackgroundColor: ".as_ptr() as *const _) };
+    // Selector: clearColor (class method on NSColor)
+    let sel_clearColor = unsafe { libc::sel_registerName(b"clearColor ".as_ptr() as *const _) };
+    // Class: NSColor
+    let cls_NSColor = unsafe { libc::objc_getClass(b"NSColor ".as_ptr() as *const _) };
 
-    // ── 3. Disable drop shadow (avoids white shadow artifacts on frameless) ─
-    ns_win.setHasShadow(false);
+    if cls_NSColor.is_null() || sel_setLevel.is_null() {
+        eprintln!("[NSWindow] ObjC runtime init failed, skipping NSPanel setup");
+        return;
+    }
+
+    // Call [NSColor clearColor]
+    let clearColor: *mut libc::c_void = unsafe { libc::msg_send(cls_NSColor, sel_clearColor) };
+
+    unsafe {
+        // [window setLevel:3]
+        libc::msg_send!(raw, sel_setLevel, 3);
+        // [window setOpaque:NO]
+        libc::msg_send!(raw, sel_setOpaque, false);
+        // [window setBackgroundColor:[NSColor clearColor]]
+        libc::msg_send!(raw, sel_setBgColor, clearColor);
+        // [window setHasShadow:NO]
+        libc::msg_send!(raw, sel_setHasShadow, false);
+    }
 
     eprintln!(
-        "[NSWindow] Configured: floating(level=3), transparent, shadow=off"
+        "[NSWindow] NSPanel: floating(3), transparent, shadow=off — OK"
     );
 }
 
