@@ -14,10 +14,10 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # Tauri core
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
 libc = "0.2"
-objc2 = "0.6"
-objc2-app-kit = "0.3"
+objc2 = { version = "0.6", features = ["macros"] }
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSColor"] }
 
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
