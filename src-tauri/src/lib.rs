@@ -411,32 +411,17 @@ pub fn run() {
                 (1600.0, 900.0)  // Fallback
             };
             
-            eprintln!("[SETUP] Creating floating window at ({}, {})", win_x, win_y);
-            let float_window = tauri::WebviewWindowBuilder::new(
-                app,
-                "floating-progress",
-                tauri::WebviewUrl::App("/floating.html".into())
-            )
-            .title("")
-            .inner_size(140.0, 140.0)
-            .position(win_x, win_y)
-            .decorations(false)       // No title bar (frameless)
-            .always_on_top(true)
-            .resizable(false)
-            .skip_taskbar(true)      // Hide from dock/taskbar
-            .visible(true)           // DEBUG: show immediately on startup
-            .build()
-            .inspect_err(|e| {
-                eprintln!("[SETUP] Floating window builder ERROR: {:?}", e);
-            })
-            .ok();
-            
-            if let Some(ref win) = float_window {
-                eprintln!("[SETUP] Floating window built, applying NSPanel config...");
-                setup_nspanel(win);  // Apply native macOS NSPanel: floating level + transparent
-                eprintln!("[SETUP] Floating window created successfully");
+            eprintln!("[SETUP] Looking for existing floating window...");
+
+            // Window is already defined in tauri.conf.json — just grab it and configure
+            if let Some(float_win) = app.get_webview_window("floating-progress") {
+                eprintln!("[SETUP] Found floating window, setting position + NSPanel config...");
+                let _ = float_win.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(win_x, win_y)));
+                setup_nspanel(&float_win);
+                let _ = float_win.show(); // DEBUG: show immediately (remove after debugging)
+                eprintln!("[SETUP] Floating window configured and shown");
             } else {
-                eprintln!("[SETUP] Failed to create floating window");
+                eprintln!("[SETUP] WARNING: floating-progress window not found in app");
             }
 
             // Tray icon updater — reads from shared state directly (updated by MQTT)
