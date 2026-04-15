@@ -426,6 +426,9 @@ pub fn run() {
             .skip_taskbar(true)      // Hide from dock/taskbar
             .visible(true)           // DEBUG: show immediately on startup
             .build()
+            .inspect_err(|e| {
+                eprintln!("[SETUP] Floating window builder ERROR: {:?}", e);
+            })
             .ok();
             
             if let Some(ref win) = float_window {
