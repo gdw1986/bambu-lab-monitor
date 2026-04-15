@@ -14,7 +14,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # Tauri core
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-shell = "2"
@@ -66,3 +66,17 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 directories = "5"
 thiserror = "1"
 once_cell = "1"
+
+# Native macOS API for NSPanel manipulation.
+# objc2 0.6.4 matches the version Tauri v2.10.3 uses internally.
+# Using explicit version forces Cargo to use ONE instance across all crates.
+objc2 = "0.6"
+features = ["std"]
+default-features = false
+
+# objc2-app-kit 0.3.x provides NSWindow/NSColor Rust bindings.
+# Its internal objc2 dependency is shadowed by the explicit 0.6 above.
+objc2-app-kit = "0.3"
+features = ["NSApplication", "NSColor", "NSResponder", "NSView", "NSWindow", "NSImage"]
+default-features = false
+

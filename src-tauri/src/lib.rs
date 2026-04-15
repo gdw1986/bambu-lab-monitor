@@ -9,7 +9,7 @@ use log::{error, info, warn};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager,
+    AppHandle, Emitter, Manager, WebviewWindow,
 };
 use tokio::sync::broadcast;
 
@@ -231,6 +231,40 @@ fn update_tray(app: &AppHandle, shared: &Arc<SharedState>, state: &str, progress
 
 // ── Tray setup ───────────────────────────────────────────────────────────────
 
+
+// ── NSPanel: native macOS floating window ──────────────────────────────────
+// Uses Tauri's macos-private-api to access the raw NSWindow and convert it
+// to a proper floating NSPanel with transparency. This bypasses WKWebView's
+// white-background issues entirely.
+#[cfg(target_os = "macos")]
+fn setup_nspanel(window: &WebviewWindow) {
+    // ns_window() returns *mut c_void. Cast to *mut NSWindow, then safely dereference.
+    let raw = window.ns_window().expect("[NSWindow] ns_window() failed");
+    let ns_win: &mut objc2_app_kit::NSWindow = unsafe { &mut *(raw as *mut objc2_app_kit::NSWindow) };
+
+    // ── 1. Floating level ─────────────────────────────────────────────────
+    // NSFloatingWindowLevel = 3: above normal windows, below sheets/alerts.
+    ns_win.setLevel(3);
+
+    // ── 2. Make transparent ───────────────────────────────────────────────
+    ns_win.setOpaque(false);
+    let clear = objc2_app_kit::NSColor::clearColor();
+    ns_win.setBackgroundColor(Some(&clear));
+
+    // ── 3. Disable drop shadow (avoids white shadow artifacts on frameless) ─
+    ns_win.setHasShadow(false);
+
+    eprintln!(
+        "[NSWindow] Configured: floating(level=3), transparent, shadow=off"
+    );
+}
+
+#[cfg(not(target_os = "macos"))]
+fn setup_nspanel(_window: &WebviewWindow) {
+    // No-op on Windows/Linux
+}
+
+
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let show = MenuItemBuilder::with_id("show", "显示窗口").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "退出").build(app)?;
@@ -386,7 +420,7 @@ pub fn run() {
             };
             
             eprintln!("[SETUP] Creating floating window at ({}, {})", win_x, win_y);
-            let _float_window = tauri::WebviewWindowBuilder::new(
+            let float_window = tauri::WebviewWindowBuilder::new(
                 app,
                 "floating-progress",
                 tauri::WebviewUrl::App("/floating.html".into())
@@ -395,7 +429,6 @@ pub fn run() {
             .inner_size(140.0, 140.0)
             .position(win_x, win_y)
             .decorations(false)       // No title bar (frameless)
-            .shadow(false)            // Remove macOS white shadow
             .always_on_top(true)
             .resizable(false)
             .skip_taskbar(true)      // Hide from dock/taskbar
@@ -403,7 +436,9 @@ pub fn run() {
             .build()
             .ok();
             
-            if _float_window.is_some() {
+            if let Some(ref win) = float_window {
+                eprintln!("[SETUP] Floating window built, applying NSPanel config...");
+                setup_nspanel(win);  // Apply native macOS NSPanel: floating level + transparent
                 eprintln!("[SETUP] Floating window created successfully");
             } else {
                 eprintln!("[SETUP] Failed to create floating window");

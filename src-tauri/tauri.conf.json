@@ -37,8 +37,7 @@
         "skipTaskbar": true,
         "alwaysOnTop": true,
         "url": "floating.html",
-        "shadow": false,
-        "backgroundColor": "#00000000"
+        "shadow": false
       }
     ],
     "trayIcon": {
