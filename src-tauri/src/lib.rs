@@ -417,8 +417,8 @@ pub fn run() {
             if let Some(float_win) = app.get_webview_window("floating-progress") {
                 // macOS: origin at bottom-left. y=0 = bottom of screen (above dock).
                 // x: right side minus window width. y=0: bottom of screen.
-                let float_x = win_x - 140.0;
-                let float_y = 0.0;
+                let float_x = (win_x - 140.0) / 2.0;  // DEBUG: center horizontally
+                let float_y = (win_y - 140.0) / 2.0;  // DEBUG: center vertically
                 eprintln!("[SETUP] Monitor size: {}x{}, float window pos: ({}, {})",
                     win_x, win_y, float_x, float_y);
                 let _ = float_win.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(float_x, float_y)));
